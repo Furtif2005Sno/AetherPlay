@@ -1,6 +1,7 @@
 import { debounce } from "lodash";
 import { computed, effectScope, onScopeDispose, ref } from "vue";
 import socket from "@/services/socket";
+import { isAetherPlay } from "@/v2/aetherplay/api";
 import { useSocketEvent } from "@/v2/composables/useSocketEvent";
 
 const UPGRADE_RECHECK_MS = 2500;
@@ -8,6 +9,9 @@ const UPGRADE_RECHECK_MS = 2500;
 export function transportLooksDegraded(
   transportName: string | undefined,
 ): boolean {
+  // AetherPlay: polling is the intended transport there (the app's custom
+  // scheme cannot carry WebSockets), so it is not a degraded connection.
+  if (isAetherPlay()) return false;
   return transportName === "polling";
 }
 

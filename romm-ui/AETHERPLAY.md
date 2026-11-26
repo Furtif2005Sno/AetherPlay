@@ -12,7 +12,7 @@ RomM, pour que les boutons Jouer lancent les jeux dans les émulateurs locaux.
 
 - `vite.config.js` : plugins `VitePWA` et `precompress` retirés (pas de service
   worker sur le schéma de l'app, fichiers précompressés inutiles).
-- `src/services/socket.ts` : transport `polling` seul (pas de WebSocket sur le schéma de l'app ; le long polling passe par le proxy).
+- `src/services/socket.ts` : transport `polling` seul (pas de WebSocket sur le schéma de l'app ; le long polling passe par le proxy) ; `src/v2/composables/useSocketTransportHealth` ne le signale plus comme connexion dégradée dans AetherPlay.
 - `src/v2/components/AppShell/AppNav.vue`, `src/v2/components/shared/AuthCard.vue` : logo AetherPlay (`public/aetherplay.png`) à la place du logo RomM.
 - Page « AetherPlay » dans les réglages : `src/v2/views/Settings/AetherPlay.vue`, `src/v2/aetherplay/api.ts` ; route `AETHERPLAY` ajoutée dans `src/plugins/routeNames.ts`, `src/plugins/router.ts`, `src/v2/router/routes.ts` ; entrées dans `SettingsSidebar.vue` et `UserMenu.vue`.
 - Non copiés : tests, Storybook, e2e.
