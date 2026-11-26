@@ -1,0 +1,27 @@
+[
+  { "id": "duckstation", "name": "DuckStation", "platforms": ["psx"], "args": ["-batch", "{rom}"], "os": ["windows", "macos"] },
+  { "id": "pcsx2", "name": "PCSX2", "platforms": ["ps2"], "args": ["-batch", "{rom}"], "os": ["windows", "macos"] },
+  { "id": "ppsspp", "name": "PPSSPP", "platforms": ["psp"], "args": ["{rom}"], "os": ["windows", "macos"] },
+  { "id": "rpcs3", "name": "RPCS3", "platforms": ["ps3"], "args": ["--no-gui", "{rom}"], "os": ["windows", "macos"], "experimental": true },
+  { "id": "vita3k", "name": "Vita3K", "platforms": ["psvita"], "args": ["{rom}"], "os": ["windows", "macos"] },
+  { "id": "shadps4", "name": "shadPS4", "platforms": ["ps4--1"], "args": ["-g", "{rom}"], "os": ["windows", "macos"], "experimental": true },
+  { "id": "dolphin", "name": "Dolphin", "platforms": ["ngc", "wii"], "args": ["-b", "-e", "{rom}"], "os": ["windows", "macos"] },
+  { "id": "cemu", "name": "Cemu", "platforms": ["wiiu"], "args": ["-g", "{rom}"], "os": ["windows", "macos"] },
+  { "id": "melonds", "name": "melonDS", "platforms": ["nds"], "args": ["{rom}"], "os": ["windows", "macos"] },
+  { "id": "azahar", "name": "Azahar", "platforms": ["3ds"], "args": ["{rom}"], "os": ["windows", "macos"] },
+  { "id": "eden", "name": "Eden", "platforms": ["switch"], "args": ["-g", "{rom}"], "os": ["windows", "macos"] },
+  { "id": "eglantine", "name": "Eglantine", "platforms": ["switch-2"], "args": ["-g", "{rom}"], "os": ["windows", "macos"], "experimental": true },
+  { "id": "flycast", "name": "Flycast", "platforms": ["dc"], "args": ["{rom}"], "os": ["windows", "macos"] },
+  { "id": "xemu", "name": "xemu", "platforms": ["xbox"], "args": ["-dvd_path", "{rom}"], "os": ["windows", "macos"] },
+  { "id": "xenia", "name": "Xenia", "platforms": ["xbox360"], "args": ["{rom}"], "os": ["windows"], "experimental": true },
+  {
+    "id": "retroarch", "name": "RetroArch", "args": ["-L", "{core}", "{rom}"], "os": ["windows", "macos"],
+    "platforms": ["nes", "snes", "n64", "gb", "gbc", "gba", "genesis-slash-megadrive", "sms", "gamegear", "turbografx16--1", "neogeoaes", "arcade", "atari2600", "saturn", "psx"],
+    "cores": {
+      "nes": "mesen", "snes": "snes9x", "n64": "mupen64plus_next", "gb": "gambatte", "gbc": "gambatte", "gba": "mgba",
+      "genesis-slash-megadrive": "genesis_plus_gx", "sms": "genesis_plus_gx", "gamegear": "genesis_plus_gx",
+      "turbografx16--1": "mednafen_pce_fast", "neogeoaes": "fbneo", "arcade": "fbneo", "atari2600": "stella",
+      "saturn": "mednafen_saturn", "psx": "swanstation"
+    }
+  }
+]

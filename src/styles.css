@@ -1,0 +1,81 @@
+/* Design tokens copied from RomM (frontend/src/tokens/index.ts, dark theme). */
+:root {
+  --r-color-brand-primary: #8b74e8;
+  --r-color-brand-primary-hover: #a18fff;
+  --r-color-brand-primary-solid: #7459e3;
+  --r-color-brand-accent: #e1a38d;
+  --r-color-bg: #07070f;
+  --r-color-surface: rgba(255, 255, 255, 0.07);
+  --r-color-surface-hover: rgba(255, 255, 255, 0.12);
+  --r-color-fg: #fff;
+  --r-color-fg-muted: rgba(255, 255, 255, 0.55);
+  --r-color-border: rgba(255, 255, 255, 0.07);
+  --r-color-border-strong: rgba(255, 255, 255, 0.15);
+  --r-color-panel: rgba(16, 12, 28, 0.97);
+  --r-color-danger: #ff6b6b;
+  --r-font: 'Segoe UI', -apple-system, BlinkMacSystemFont, system-ui, Inter, Roboto, sans-serif;
+  --r-radius-md: 8px;
+  --r-radius-card: 14px;
+  --r-radius-pill: 100px;
+  --r-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; margin: 0; }
+
+body {
+  background:
+    radial-gradient(1200px 600px at 10% -10%, color-mix(in srgb, var(--r-color-brand-primary) 22%, transparent), transparent),
+    var(--r-color-bg);
+  color: var(--r-color-fg);
+  font: 13px/1.4 var(--r-font);
+  height: 100vh;
+  overflow: hidden;
+}
+
+#app { height: 100%; }
+
+button, input { font: inherit; color: inherit; }
+
+.btn {
+  border: 0;
+  border-radius: var(--r-radius-pill);
+  padding: 8px 18px;
+  background: var(--r-color-surface);
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.btn:hover { background: var(--r-color-surface-hover); }
+.btn:disabled { opacity: 0.5; cursor: default; }
+.btn.primary { background: var(--r-color-brand-primary-solid); font-weight: 600; }
+.btn.primary:hover { background: var(--r-color-brand-primary); }
+
+.input {
+  width: 100%;
+  padding: 10px 14px;
+  border-radius: var(--r-radius-md);
+  border: 1px solid var(--r-color-border-strong);
+  background: var(--r-color-surface);
+  outline: none;
+}
+.input:focus { border-color: var(--r-color-brand-primary); }
+
+.panel {
+  background: var(--r-color-panel);
+  border: 1px solid var(--r-color-border-strong);
+  border-radius: var(--r-radius-card);
+  box-shadow: var(--r-shadow);
+}
+
+.muted { color: var(--r-color-fg-muted); }
+.error { color: var(--r-color-danger); }
+.tag {
+  font-size: 10.5px;
+  padding: 2px 8px;
+  border-radius: var(--r-radius-pill);
+  background: color-mix(in srgb, var(--r-color-brand-accent) 25%, transparent);
+  color: var(--r-color-brand-accent);
+}
+
+::-webkit-scrollbar { width: 8px; }
+::-webkit-scrollbar-thumb { background: var(--r-color-border-strong); border-radius: 8px; }
