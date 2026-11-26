@@ -8,7 +8,12 @@
 
 use crate::config;
 use base64::Engine;
-use std::{path::PathBuf, sync::LazyLock};
+use reqwest::cookie::{CookieStore, Jar};
+use std::{
+    io::Write,
+    path::PathBuf,
+    sync::{Arc, LazyLock, RwLock},
+};
 use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder, http};
 
 /// Origin the `romm` scheme is served from (WebView2 maps custom schemes to http).
@@ -16,8 +21,47 @@ pub const ORIGIN: &str = if cfg!(windows) { "http://romm.localhost" } else { "ro
 
 const BRIDGE: &str = include_str!("bridge.js");
 
-static HTTP: LazyLock<reqwest::Client> =
-    LazyLock::new(|| reqwest::Client::builder().user_agent("aetherplay").build().expect("http client"));
+/// HTTP client with its own cookie jar: RomM's session cookie is kept here, in
+/// the proxy, so being logged in never depends on the webview storing cookies
+/// (custom schemes cannot, on macOS) nor on the keychain.
+static SESSION: LazyLock<RwLock<(reqwest::Client, Arc<Jar>)>> = LazyLock::new(|| RwLock::new(new_session()));
+
+fn new_session() -> (reqwest::Client, Arc<Jar>) {
+    let jar = Arc::new(Jar::default());
+    let client = reqwest::Client::builder()
+        .user_agent("aetherplay")
+        .cookie_provider(jar.clone())
+        .build()
+        .expect("http client");
+    (client, jar)
+}
+
+fn session() -> (reqwest::Client, Arc<Jar>) {
+    SESSION.read().expect("session lock").clone()
+}
+
+fn reset_session() {
+    *SESSION.write().expect("session lock") = new_session();
+}
+
+fn cookie_value(cookies: &str, name: &str) -> Option<String> {
+    cookies.split(';').filter_map(|c| c.trim().split_once('=')).find(|(k, _)| *k == name).map(|(_, v)| v.to_string())
+}
+
+/// Appends one line to proxy.log in the app's log folder (no secrets: method,
+/// path, status and which authentication was used).
+fn log(app: &AppHandle, line: &str) {
+    let Ok(dir) = app.path().app_log_dir() else { return };
+    let _ = std::fs::create_dir_all(&dir);
+    let file = dir.join("proxy.log");
+    if std::fs::metadata(&file).is_ok_and(|m| m.len() > 1 << 20) {
+        let _ = std::fs::remove_file(&file);
+    }
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(file) {
+        let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
+        let _ = writeln!(f, "{secs} {line}");
+    }
+}
 
 /// Request headers never forwarded: the proxy owns auth, cookies and encoding.
 const DROP_REQUEST: &[&str] =
@@ -114,33 +158,56 @@ async fn proxy(app: &AppHandle, req: http::Request<Vec<u8>>) -> Result<http::Res
     let path = req.uri().path().to_string();
     let pq = req.uri().path_and_query().map_or(path.clone(), |p| p.as_str().to_string());
     let method = reqwest::Method::from_bytes(req.method().as_str().as_bytes()).map_err(|e| e.to_string())?;
-    let mut rb = HTTP.request(method.clone(), format!("{}{pq}", cfg.server_url));
+    let (http, jar) = session();
+    let url = format!("{}{pq}", cfg.server_url);
+    let mut rb = http.request(method.clone(), &url);
     for (name, value) in req.headers() {
         if !DROP_REQUEST.contains(&name.as_str()) {
             rb = rb.header(name.as_str(), value.as_bytes());
         }
     }
-    // The page's own Authorization (its login form) wins over the stored one.
+    let cookies = url.parse().ok().and_then(|u| jar.cookies(&u)).and_then(|v| v.to_str().ok().map(str::to_owned)).unwrap_or_default();
+    let has_session = cookie_value(&cookies, "romm_session").is_some();
+    // The page's own Authorization (its login form) wins; then the session the
+    // proxy holds; then the credentials remembered from the last login.
     let page_auth = req.headers().get(http::header::AUTHORIZATION).and_then(|v| v.to_str().ok()).map(str::to_owned);
+    let mut auth = if page_auth.is_some() { "page" } else if has_session { "session" } else { "none" };
     if page_auth.is_none()
+        && !has_session
         && let Some(pass) = config::get_password(&cfg.username)
     {
         rb = rb.basic_auth(&cfg.username, Some(pass));
+        auth = "stored";
+    }
+    // Session-authenticated writes need RomM's CSRF token, which lives in the jar.
+    if !matches!(method, reqwest::Method::GET | reqwest::Method::HEAD | reqwest::Method::OPTIONS)
+        && let Some(token) = cookie_value(&cookies, "romm_csrftoken").or_else(|| cookie_value(&cookies, "csrftoken"))
+    {
+        rb = rb.header("x-csrftoken", token);
     }
     let res = rb.body(req.into_body()).send().await.map_err(|e| e.to_string())?;
     let status = res.status();
+    if path == "/api/login" || path == "/api/logout" || path == "/api/users/me" || (status.as_u16() >= 400 && path.starts_with("/api/")) {
+        log(app, &format!("{method} {path} -> {} (auth: {auth})", status.as_u16()));
+    }
 
     if status.is_success() && method == reqwest::Method::POST {
         if path == "/api/login"
             && let Some((user, pass)) = page_auth.as_deref().and_then(decode_basic)
         {
-            // Logging in from RomM's own form: remember it for the proxy.
-            config::set_password(&user, &pass)?;
+            // Logging in from RomM's own form: remember it for the next start.
+            // Never fatal: the session cookie in the jar already logs us in.
+            if let Err(e) = config::set_password(&user, &pass) {
+                log(app, &format!("keychain: could not store the password: {e}"));
+            }
             let mut cfg = config::load(app);
             cfg.username = user;
-            config::save(app, &cfg)?;
+            if let Err(e) = config::save(app, &cfg) {
+                log(app, &format!("config: could not save: {e}"));
+            }
         } else if path == "/api/logout" {
             config::clear_password(&cfg.username);
+            reset_session();
         }
     }
 

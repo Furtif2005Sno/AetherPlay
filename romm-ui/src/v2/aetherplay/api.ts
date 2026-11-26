@@ -30,6 +30,14 @@ export interface Emulator {
   name: string;
   platforms: string[];
   experimental: boolean;
+  /** Present for yuzu-family emulators (Eden, Eglantine): save import works there. */
+  config_ini?: Record<string, string>;
+}
+
+export interface ImportReport {
+  title_id: string;
+  destinations: string[];
+  files: number;
 }
 
 export interface CacheEntry {
@@ -57,6 +65,8 @@ export const app = {
   cacheDelete: (path: string) => invoke<void>("cache_delete", { path }),
   cacheClear: () => invoke<void>("cache_clear"),
   openAppSettings: () => invoke<void>("open_settings"),
+  importSave: (id: string, path: string) => invoke<ImportReport>("import_save", { id, path }),
+  openLog: () => invoke<void>("open_log"),
   onInstallProgress: (handler: (p: { id: string; done: number; total: number }) => void) =>
     tauri().event.listen<{ id: string; done: number; total: number }>("install-progress", (e) => handler(e.payload)),
 };

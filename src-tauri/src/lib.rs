@@ -2,6 +2,7 @@ mod cache;
 mod config;
 mod emulators;
 mod gamepad;
+mod import;
 mod install;
 mod romm;
 mod roms;
@@ -371,6 +372,31 @@ async fn pick_path(app: AppHandle, directory: bool, title: String) -> Option<Str
     .flatten()
 }
 
+/// Imports a Switch save archive into Eden / Eglantine (see import.rs).
+#[tauri::command]
+async fn import_save(app: AppHandle, id: String, path: String) -> Result<import::ImportReport, String> {
+    let emu = emulators::catalog().iter().find(|e| e.id == id).ok_or("Émulateur inconnu")?;
+    if emu.config_ini.is_empty() {
+        return Err(format!("L'import de sauvegarde n'est pas disponible pour {}", emu.name));
+    }
+    let cfg = config::load(&app);
+    let exe = cfg.emulator_paths.get(&id).cloned().unwrap_or_default();
+    let roots = emu.save_dirs(&exe, None, &path_vars(&app)?, &cfg.save_dirs);
+    tauri::async_runtime::spawn_blocking(move || import::import_switch_save(std::path::Path::new(&path), &roots))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// Shows the diagnostic log (proxy.log) in the file manager.
+#[tauri::command]
+fn open_log(app: AppHandle) -> Result<(), String> {
+    let file = app.path().app_log_dir().map_err(|e| e.to_string())?.join("proxy.log");
+    if !file.exists() {
+        return Err("Le journal est vide pour l'instant.".into());
+    }
+    tauri_plugin_opener::reveal_item_in_dir(file).map_err(|e| e.to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -405,7 +431,9 @@ pub fn run() {
             open_settings,
             open_romm,
             set_option,
-            pick_path
+            pick_path,
+            import_save,
+            open_log
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

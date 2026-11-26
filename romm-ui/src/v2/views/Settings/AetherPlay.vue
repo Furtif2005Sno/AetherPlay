@@ -74,6 +74,34 @@ async function pickSaves(emu: Emulator) {
   if (path) await run(() => app.setSaveDir(emu.id, path));
 }
 
+const notice = ref("");
+
+const canImport = (emu: Emulator) => Object.keys(emu.config_ini ?? {}).length > 0;
+
+async function importSave(emu: Emulator) {
+  const path = await app.pickPath(false, `Sauvegarde à importer dans ${emu.name} (fichier .zip)`);
+  if (!path) return;
+  error.value = "";
+  notice.value = "";
+  try {
+    const report = await app.importSave(emu.id, path);
+    notice.value =
+      `Sauvegarde importée (${report.files} fichiers, jeu ${report.title_id}). ` +
+      "L'ancienne a été mise de côté. Lance le jeu depuis AetherPlay : à la fermeture, elle sera envoyée sur RomM.";
+  } catch (e) {
+    error.value = String(e);
+  }
+}
+
+async function openLog() {
+  error.value = "";
+  try {
+    await app.openLog();
+  } catch (e) {
+    error.value = String(e);
+  }
+}
+
 function clearCache() {
   if (confirm("Supprimer toutes les ROMs téléchargées ? Elles seront retéléchargées au prochain lancement.")) {
     run(() => app.cacheClear());
@@ -103,6 +131,7 @@ onUnmounted(() => unlisten?.());
 <template>
   <div v-if="settings" class="r-v2-section-stack">
     <p v-if="error" class="aep-error">{{ error }}</p>
+    <p v-if="notice" class="aep-notice">{{ notice }}</p>
 
     <SettingsSection title="Lancement des jeux" icon="mdi-rocket-launch-outline">
       <div class="aep-toggles">
@@ -163,6 +192,15 @@ onUnmounted(() => unlisten?.());
                     : "Installer"
               }}
             </RBtn>
+            <RBtn
+              v-if="canImport(emu) && settings.emulator_paths[emu.id]"
+              size="small"
+              variant="outlined"
+              prepend-icon="mdi-file-import-outline"
+              @click="importSave(emu)"
+            >
+              Importer une sauvegarde…
+            </RBtn>
             <RBtn size="small" variant="outlined" @click="pickExe(emu)">
               {{ isMac ? "Choisir l'app…" : "Choisir…" }}
             </RBtn>
@@ -219,6 +257,18 @@ onUnmounted(() => unlisten?.());
           <div class="aep-muted">Serveur RomM utilisé par AetherPlay.</div>
         </div>
         <RBtn size="small" variant="outlined" @click="app.openAppSettings()">Changer…</RBtn>
+      </div>
+    </SettingsSection>
+
+    <SettingsSection title="Diagnostic" icon="mdi-file-document-outline">
+      <div class="aep-row">
+        <div class="aep-row__info">
+          <div class="aep-row__title">Journal de connexion</div>
+          <div class="aep-muted">
+            Étapes de connexion au serveur (sans mot de passe), utile si la connexion ne marche pas.
+          </div>
+        </div>
+        <RBtn size="small" variant="outlined" @click="openLog">Afficher le fichier</RBtn>
       </div>
     </SettingsSection>
   </div>
@@ -282,6 +332,10 @@ onUnmounted(() => unlisten?.());
 }
 .aep-error {
   color: var(--r-color-status-error, #ff6b6b);
+  font-size: var(--r-font-size-sm);
+}
+.aep-notice {
+  color: var(--r-color-status-success, #4ade80);
   font-size: var(--r-font-size-sm);
 }
 a {
