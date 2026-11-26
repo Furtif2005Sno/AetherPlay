@@ -61,6 +61,46 @@ fn resolve(dirs: &[PathBuf], key: &str) -> Option<PathBuf> {
         .then(|| root.join(rel))
 }
 
+/// Placeholder for the emulator user profile in uploaded archive entries.
+const PROFILE: &str = "_profile_";
+
+fn is_hex(s: &str, len: usize) -> bool {
+    s.len() == len && s.chars().all(|c| c.is_ascii_hexdigit())
+}
+
+/// yuzu-family emulators (Eden, Eglantine) keep a game's save under
+/// `<16 hex>/<32 hex profile id>/<title id>/`, and the profile id is random per
+/// install. Archive entries replace it with a placeholder so a save made on
+/// one machine lands in the right profile on another.
+fn to_portable(key: &str) -> String {
+    let parts: Vec<&str> = key.splitn(4, '/').collect();
+    match parts.as_slice() {
+        [idx, zeros, profile, rest] if is_hex(zeros, 16) && is_hex(profile, 32) => {
+            format!("{idx}/{zeros}/{PROFILE}/{rest}")
+        }
+        _ => key.to_string(),
+    }
+}
+
+/// Inverse of `to_portable` for this machine: the placeholder becomes the local
+/// profile folder (the one already holding saves), or `None` when the emulator
+/// has no profile folder yet (no game was ever started here).
+fn from_portable(key: &str, dirs: &[PathBuf]) -> Option<String> {
+    let parts: Vec<&str> = key.splitn(4, '/').collect();
+    let [idx, zeros, profile, rest] = parts.as_slice() else { return Some(key.to_string()) };
+    if *profile != PROFILE {
+        return Some(key.to_string());
+    }
+    let root = dirs.get(idx.parse::<usize>().ok()?)?.join(zeros);
+    let local = std::fs::read_dir(root)
+        .ok()?
+        .flatten()
+        .filter(|e| e.path().is_dir())
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .find(|n| is_hex(n, 32))?;
+    Some(format!("{idx}/{zeros}/{local}/{rest}"))
+}
+
 fn modified(p: &Path) -> Option<SystemTime> {
     std::fs::metadata(p).ok()?.modified().ok()
 }
@@ -82,15 +122,25 @@ fn write_if_newer(target: &Path, data: &[u8], remote: SystemTime) -> Result<bool
 /// single_file_as: for emulators keeping one save file per game named after
 /// the ROM (RetroArch: <rom stem>.srm), any raw save RomM holds for the game
 /// (e.g. from its web player) is accepted too, and written under that name.
-/// Returns a one-line description of what happened, for the diagnostic log.
+/// orce writes even over newer local files (used for a deferred restore,
+/// over the blank save a first session created).
+pub struct Restored {
+    /// One-line description, for the diagnostic log.
+    pub message: String,
+    /// The save targets an emulator profile that does not exist yet on this
+    /// machine: restore again, forced, once the game has run once.
+    pub deferred: bool,
+}
+
 pub async fn restore(
     client: &Client,
     rom: &Rom,
     emu: &str,
     dirs: &[PathBuf],
     single_file_as: Option<&str>,
+    force: bool,
     index: &mut Index,
-) -> Result<String, String> {
+) -> Result<Restored, String> {
     let saves = client.saves(rom.id).await?;
     let total = saves.len();
     let ours = |s: &crate::romm::Save| s.emulator.as_deref() == Some(emu) && s.slot.as_deref() == Some(SLOT);
@@ -99,12 +149,24 @@ pub async fn restore(
         .filter(|s| ours(s) || (single_file_as.is_some() && !s.file_name.starts_with(ZIP_PREFIX)))
         .max_by_key(|s| s.updated_at);
     let Some(save) = latest else {
-        return Ok(format!("aucune sauvegarde utilisable sur RomM ({total} pour ce jeu)"));
+        return Ok(Restored { message: format!("aucune sauvegarde utilisable sur RomM ({total} pour ce jeu)"), deferred: false });
     };
     let data = client.save_content(save.id).await?;
     let remote: SystemTime = save.updated_at.into();
     let mut keys = Vec::new();
     let mut written = 0;
+    let mut no_profile = 0;
+    let write = |target: &Path, data: &[u8]| -> Result<bool, String> {
+        if force {
+            if let Some(dir) = target.parent() {
+                std::fs::create_dir_all(dir).map_err(err)?;
+            }
+            std::fs::write(target, data).map_err(err)?;
+            Ok(true)
+        } else {
+            write_if_newer(target, data, remote)
+        }
+    };
 
     if save.file_name.starts_with(ZIP_PREFIX) && save.file_name.ends_with(".zip") {
         let mut archive = zip::ZipArchive::new(Cursor::new(data)).map_err(err)?;
@@ -113,11 +175,16 @@ pub async fn restore(
             if file.is_dir() {
                 continue;
             }
-            let key = file.name().map_err(err)?.replace('\\', "/");
+            let portable = file.name().map_err(err)?.replace('\\', "/");
+            // Switch saves: map the profile placeholder onto this machine's profile.
+            let Some(key) = from_portable(&portable, dirs) else {
+                no_profile += 1;
+                continue;
+            };
             let Some(target) = resolve(dirs, &key) else { continue };
             let mut buf = Vec::with_capacity(file.size() as usize);
             file.read_to_end(&mut buf).map_err(err)?;
-            written += usize::from(write_if_newer(&target, &buf, remote)?);
+            written += usize::from(write(&target, &buf)?);
             keys.push(key);
         }
     } else {
@@ -131,17 +198,20 @@ pub async fn restore(
         };
         let key = format!("0/{name}");
         if let Some(target) = resolve(dirs, &key) {
-            written += usize::from(write_if_newer(&target, &data, remote)?);
+            written += usize::from(write(&target, &data)?);
             keys.push(key);
         }
     }
     index.entry(rom.id, emu).extend(keys);
     index.save()?;
-    Ok(if written > 0 {
+    let message = if no_profile > 0 {
+        format!("« {} » : profil de l'émulateur absent ici, restauration reportée à la fin de la partie", save.file_name)
+    } else if written > 0 {
         format!("« {} » ({}) restaurée : {written} fichier(s)", save.file_name, save.emulator.unwrap_or_default())
     } else {
         format!("« {} » plus ancienne que la copie locale : gardée telle quelle", save.file_name)
-    })
+    };
+    Ok(Restored { message, deferred: no_profile > 0 })
 }
 
 /// Files under `dirs` modified since `since`, as index keys.
@@ -209,7 +279,7 @@ pub async fn upload(
                 .compression_method(zip::CompressionMethod::Deflated);
             for key in &keys {
                 let path = resolve(dirs, key).ok_or("Chemin invalide")?;
-                zip.start_file(key.as_str(), opts).map_err(err)?;
+                zip.start_file(to_portable(key), opts).map_err(err)?;
                 zip.write_all(&std::fs::read(path).map_err(err)?).map_err(err)?;
             }
             (format!("{ZIP_PREFIX}{emu}.zip"), zip.finish().map_err(err)?.into_inner())
@@ -224,6 +294,29 @@ pub async fn upload(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn switch_saves_move_between_emulator_profiles() {
+        let mac_profile = "A1B2C3D4E5F60718293A4B5C6D7E8F90";
+        let key = format!("0/0000000000000000/{mac_profile}/0400A3A01EE4C000/G00/STGDAT01.BIN");
+        let portable = to_portable(&key);
+        assert_eq!(portable, "0/0000000000000000/_profile_/0400A3A01EE4C000/G00/STGDAT01.BIN");
+        // Non-Switch keys are left alone.
+        assert_eq!(to_portable("0/Game.srm"), "0/Game.srm");
+
+        let root = std::env::temp_dir().join(format!("romm-profile-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let dirs = vec![root.clone()];
+        // No profile folder yet on this machine: cannot place it.
+        assert_eq!(from_portable(&portable, &dirs), None);
+        let pc_profile = "0F1E2D3C4B5A69788796A5B4C3D2E1F0";
+        std::fs::create_dir_all(root.join("0000000000000000").join(pc_profile)).unwrap();
+        assert_eq!(
+            from_portable(&portable, &dirs).unwrap(),
+            format!("0/0000000000000000/{pc_profile}/0400A3A01EE4C000/G00/STGDAT01.BIN")
+        );
+        std::fs::remove_dir_all(&root).unwrap();
+    }
 
     #[test]
     fn resolve_rejects_traversal_and_bad_index() {

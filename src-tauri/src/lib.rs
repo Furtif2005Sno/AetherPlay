@@ -257,16 +257,18 @@ async fn launch(app: AppHandle, rom_id: u64, fullscreen: bool) -> Result<LaunchR
     shell::log(&app, &format!("launch rom={rom_id} ({}) : {} via {}, saves {:?}", rom.fs_name, rom.platform_slug, emu.name, save_dirs));
     let data_dir = app.path().app_local_data_dir().map_err(|e| fail("launch-failed", e.to_string()))?;
     let mut index = saves::Index::load(data_dir.join("saves-index.json"));
+    // RetroArch keeps one `<rom stem>.srm` per game: RomM's other saves fit.
+    let single_file_as = (!emu.cores.is_empty())
+        .then(|| target.file_stem().map(|s| format!("{}.srm", s.to_string_lossy())))
+        .flatten();
+    let mut deferred = false;
     if !save_dirs.is_empty() {
         launch_state(&app, rom_id, json!({ "status": "downloading", "stage": "save" }));
         // A failed restore must not block playing; the page is told.
-        // RetroArch keeps one <rom stem>.srm per game: RomM's other saves fit.
-        let single_file_as = (!emu.cores.is_empty())
-            .then(|| target.file_stem().map(|s| format!("{}.srm", s.to_string_lossy())))
-            .flatten();
-        let action = match saves::restore(&client, &rom, &emu.id, &save_dirs, single_file_as.as_deref(), &mut index).await {
-            Ok(what) => {
-                shell::log(&app, &format!("sync rom={rom_id}: restauration : {what}"));
+        let action = match saves::restore(&client, &rom, &emu.id, &save_dirs, single_file_as.as_deref(), false, &mut index).await {
+            Ok(restored) => {
+                shell::log(&app, &format!("sync rom={rom_id}: restauration : {}", restored.message));
+                deferred = restored.deferred;
                 json!({ "action": "downloaded", "slot": saves::SLOT })
             }
             Err(e) => {
@@ -300,6 +302,18 @@ async fn launch(app: AppHandle, rom_id: u64, fullscreen: bool) -> Result<LaunchR
         }
         launch_state(&app2, rom_id, json!({ "status": "exited", "exitCode": code }));
         if save_dirs.is_empty() {
+            return;
+        }
+        if deferred {
+            // First run of the game on this machine: the emulator profile now
+            // exists, so put RomM's save in place over the blank one, and do not
+            // upload that blank session.
+            let what = match saves::restore(&client, &rom, &emu.id, &save_dirs, single_file_as.as_deref(), true, &mut index).await {
+                Ok(r) => r.message,
+                Err(e) => format!("échec : {e}"),
+            };
+            shell::log(&app2, &format!("sync rom={rom_id}: restauration reportée : {what}"));
+            launch_state(&app2, rom_id, json!({ "status": "sync", "sync": { "action": "downloaded", "slot": saves::SLOT } }));
             return;
         }
         let core = emu.core(&rom.platform_slug);
