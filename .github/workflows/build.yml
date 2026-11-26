@@ -1,7 +1,7 @@
 name: Build
 
 # Push to main: installers as workflow artifacts.
-# Tag v*: same, plus a draft GitHub release with the installers attached.
+# Tag v*: same, plus a published GitHub release with the installers attached.
 on:
   push:
     branches: [main]
@@ -64,7 +64,7 @@ jobs:
           tagName: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || '' }}
           releaseName: AetherPlay ${{ github.ref_name }}
           releaseBody: Installeurs Windows et macOS (Apple Silicon). Voir le README pour le premier lancement sur Mac.
-          releaseDraft: true
+          releaseDraft: false
 
       - uses: actions/upload-artifact@v4
         with:
