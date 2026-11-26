@@ -15,8 +15,8 @@ use std::{
     time::SystemTime,
 };
 
-pub const SLOT: &str = "romm-desktop";
-const ZIP_PREFIX: &str = "romm-desktop-";
+pub const SLOT: &str = "aetherplay";
+const ZIP_PREFIX: &str = "aetherplay-";
 const MAX_DEPTH: usize = 8;
 
 fn err(e: impl std::fmt::Display) -> String {

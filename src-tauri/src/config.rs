@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, path::PathBuf};
 use tauri::{AppHandle, Manager};
 
-const KEYRING_SERVICE: &str = "romm-desktop";
+const KEYRING_SERVICE: &str = "aetherplay";
 
 /// Persisted settings (the password lives in the OS keychain, never in this file).
 #[derive(Default, Clone, Serialize, Deserialize)]

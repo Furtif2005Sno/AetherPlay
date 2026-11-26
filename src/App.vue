@@ -35,7 +35,7 @@ onMounted(refresh);
     />
     <div v-else class="shell">
       <nav>
-        <strong class="logo">RomM <span>Desktop</span></strong>
+        <strong class="logo">Aether<span>Play</span></strong>
         <button class="btn" :class="{ primary: view === 'library' }" @click="view = 'library'">Bibliothèque</button>
         <button class="btn" :class="{ primary: view === 'emulators' }" @click="view = 'emulators'">Émulateurs</button>
         <button class="btn" :class="{ primary: view === 'storage' }" @click="view = 'storage'">Stockage</button>

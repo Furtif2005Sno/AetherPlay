@@ -28,7 +28,7 @@ async function submit() {
 <template>
   <div class="wrap">
     <form class="panel card" @submit.prevent="submit">
-      <h1>RomM <span>Desktop</span></h1>
+      <h1>Aether<span>Play</span></h1>
       <p class="muted">Connecte-toi à ton serveur RomM</p>
       <input v-model="url" class="input" placeholder="https://romm.exemple.fr" required />
       <input v-model="user" class="input" placeholder="Utilisateur" autocomplete="username" required />

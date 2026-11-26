@@ -1,12 +1,12 @@
 [package]
-name = "romm-desktop"
+name = "aetherplay"
 version = "0.1.0"
 description = "Client desktop pour RomM"
 authors = ["Anthares74"]
 edition = "2024"
 
 [lib]
-name = "romm_desktop_lib"
+name = "aetherplay_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]

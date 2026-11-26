@@ -52,13 +52,13 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tagName: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || '' }}
-          releaseName: RomM Desktop ${{ github.ref_name }}
+          releaseName: AetherPlay ${{ github.ref_name }}
           releaseBody: Installeurs Windows et macOS (Apple Silicon). Voir le README pour le premier lancement sur Mac.
           releaseDraft: true
 
       - uses: actions/upload-artifact@v4
         with:
-          name: romm-desktop-${{ matrix.name }}
+          name: aetherplay-${{ matrix.name }}
           if-no-files-found: error
           path: |
             src-tauri/target/release/bundle/msi/*.msi

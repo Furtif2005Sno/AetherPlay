@@ -65,7 +65,7 @@ pub fn installable() -> Vec<String> {
 }
 
 fn http() -> reqwest::Client {
-    reqwest::Client::builder().user_agent("romm-desktop").build().expect("http client")
+    reqwest::Client::builder().user_agent("aetherplay").build().expect("http client")
 }
 
 /// Finds the download URL and file name for `src`.

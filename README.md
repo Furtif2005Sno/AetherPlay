@@ -1,4 +1,4 @@
-# RomM Desktop
+# AetherPlay
 
 Client desktop (Windows / macOS Apple Silicon) pour [RomM](https://github.com/rommapp/romm) :
 parcourir sa bibliothèque, cliquer sur **Jouer**, la ROM est téléchargée puis lancée dans l'émulateur adapté.
@@ -39,5 +39,5 @@ npm run tauri build    # générer l'installeur
 L'app n'est pas notarisée par Apple. Au premier lancement : Réglages Système > Confidentialité et sécurité > « Ouvrir quand même », ou :
 
 ```sh
-xattr -dr com.apple.quarantine "/Applications/RomM Desktop.app"
+xattr -dr com.apple.quarantine "/Applications/AetherPlay.app"
 ```

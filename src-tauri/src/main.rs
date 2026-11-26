@@ -2,5 +2,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-    romm_desktop_lib::run()
+    aetherplay_lib::run()
 }
