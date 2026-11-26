@@ -58,17 +58,53 @@ fn file(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(dir.join("config.json"))
 }
 
+/// Settings kept in memory: read from disk once, written on each save (the
+/// proxy reads them on every request of the interface).
+static CACHE: std::sync::RwLock<Option<Config>> = std::sync::RwLock::new(None);
+
 pub fn load(app: &AppHandle) -> Config {
-    file(app)
+    if let Some(cfg) = CACHE.read().expect("config lock").as_ref() {
+        return cfg.clone();
+    }
+    let cfg: Config = file(app)
         .ok()
         .and_then(|p| std::fs::read(p).ok())
         .and_then(|b| serde_json::from_slice(&b).ok())
-        .unwrap_or_default()
+        .unwrap_or_default();
+    *CACHE.write().expect("config lock") = Some(cfg.clone());
+    cfg
 }
 
 pub fn save(app: &AppHandle, cfg: &Config) -> Result<(), String> {
     let json = serde_json::to_vec_pretty(cfg).map_err(|e| e.to_string())?;
-    std::fs::write(file(app)?, json).map_err(|e| e.to_string())
+    std::fs::write(file(app)?, json).map_err(|e| e.to_string())?;
+    *CACHE.write().expect("config lock") = Some(cfg.clone());
+    Ok(())
+}
+
+/// The keychain is slow to query: remember its answer for the session.
+static PASSWORD: std::sync::Mutex<Option<(String, Option<String>)>> = std::sync::Mutex::new(None);
+
+pub fn get_password(user: &str) -> Option<String> {
+    let mut cached = PASSWORD.lock().expect("password lock");
+    if let Some((u, p)) = cached.as_ref()
+        && u == user
+    {
+        return p.clone();
+    }
+    let p = get_password_os(user);
+    *cached = Some((user.to_string(), p.clone()));
+    p
+}
+
+pub fn set_password(user: &str, password: &str) -> Result<(), String> {
+    *PASSWORD.lock().expect("password lock") = Some((user.to_string(), Some(password.to_string())));
+    set_password_os(user, password)
+}
+
+pub fn clear_password(user: &str) {
+    *PASSWORD.lock().expect("password lock") = Some((user.to_string(), None));
+    clear_password_os(user);
 }
 
 #[cfg(not(target_os = "linux"))]
@@ -77,19 +113,19 @@ fn entry(user: &str) -> Result<keyring::Entry, String> {
 }
 
 #[cfg(not(target_os = "linux"))]
-pub fn set_password(user: &str, password: &str) -> Result<(), String> {
+fn set_password_os(user: &str, password: &str) -> Result<(), String> {
     entry(user)?.set_password(password).map_err(|e| e.to_string())
 }
 
 #[cfg(not(target_os = "linux"))]
-pub fn clear_password(user: &str) {
+fn clear_password_os(user: &str) {
     if let Ok(e) = entry(user) {
         let _ = e.delete_credential();
     }
 }
 
 #[cfg(not(target_os = "linux"))]
-pub fn get_password(user: &str) -> Option<String> {
+fn get_password_os(user: &str) -> Option<String> {
     entry(user).ok()?.get_password().ok()
 }
 
@@ -131,14 +167,14 @@ fn write_credentials(all: &HashMap<String, String>) -> Result<(), String> {
 }
 
 #[cfg(target_os = "linux")]
-pub fn set_password(user: &str, password: &str) -> Result<(), String> {
+fn set_password_os(user: &str, password: &str) -> Result<(), String> {
     let mut all = read_credentials();
     all.insert(user.to_string(), password.to_string());
     write_credentials(&all)
 }
 
 #[cfg(target_os = "linux")]
-pub fn clear_password(user: &str) {
+fn clear_password_os(user: &str) {
     let mut all = read_credentials();
     if all.remove(user).is_some() {
         let _ = write_credentials(&all);
@@ -146,6 +182,6 @@ pub fn clear_password(user: &str) {
 }
 
 #[cfg(target_os = "linux")]
-pub fn get_password(user: &str) -> Option<String> {
+fn get_password_os(user: &str) -> Option<String> {
     read_credentials().remove(user)
 }

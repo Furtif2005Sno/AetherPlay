@@ -19,6 +19,7 @@ const catalog = ref<Emulator[]>([]);
 const installable = ref<string[]>([]);
 const saveDirs = ref<Record<string, string[]>>({});
 const cache = ref<CacheEntry[]>([]);
+const imageCache = ref(0);
 /** Emulator id -> download percentage while installing, or an error message. */
 const installs = ref<Record<string, number | string>>({});
 const error = ref("");
@@ -72,10 +73,11 @@ const shared = computed(() => {
 });
 
 async function refresh() {
-  [settings.value, saveDirs.value, cache.value] = await Promise.all([
+  [settings.value, saveDirs.value, cache.value, imageCache.value] = await Promise.all([
     app.settings(),
     app.saveDirs(),
     app.cacheList(),
+    app.imageCacheSize(),
   ]);
 }
 
@@ -342,6 +344,13 @@ onUnmounted(() => {
         <p class="aep-muted aep-pad">
           ROMs téléchargées : {{ formatSize(cacheTotal) }}. Les sauvegardes ne sont pas touchées.
         </p>
+        <div class="aep-row">
+          <div class="aep-row__info">
+            <div class="aep-row__title">Jaquettes et images en cache : {{ formatSize(imageCache) }}</div>
+            <div class="aep-muted">Gardées sur l'ordinateur pour faire défiler la bibliothèque sans les retélécharger.</div>
+          </div>
+          <RBtn size="small" variant="text" :disabled="!imageCache" @click="run(() => app.imageCacheClear())">Vider</RBtn>
+        </div>
         <div v-for="item in cache" :key="item.path" class="aep-row">
           <div class="aep-row__info">
             <div class="aep-row__title aep-path">{{ item.name }}</div>

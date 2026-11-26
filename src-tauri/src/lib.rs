@@ -525,6 +525,28 @@ fn open_log(app: AppHandle) -> Result<(), String> {
     tauri_plugin_opener::reveal_item_in_dir(file).map_err(|e| e.to_string())
 }
 
+/// Size of the cover / screenshot cache (bytes).
+#[tauri::command]
+fn image_cache_size(app: AppHandle) -> u64 {
+    shell::image_cache_dir(&app)
+        .and_then(|d| std::fs::read_dir(d).ok())
+        .into_iter()
+        .flatten()
+        .filter_map(Result::ok)
+        .filter_map(|e| e.metadata().ok())
+        .map(|m| m.len())
+        .sum()
+}
+
+/// Empties the cover / screenshot cache (they are downloaded again as needed).
+#[tauri::command]
+fn image_cache_clear(app: AppHandle) -> Result<(), String> {
+    match shell::image_cache_dir(&app) {
+        Some(dir) if dir.exists() => std::fs::remove_dir_all(dir).map_err(|e| e.to_string()),
+        _ => Ok(()),
+    }
+}
+
 /// Android controller: pairing code, port, connected phones.
 #[tauri::command]
 fn phone_status() -> serde_json::Value {
@@ -596,6 +618,8 @@ pub fn run() {
             open_log,
             phone_status,
             phone_forget,
+            image_cache_size,
+            image_cache_clear,
             install_vigem
         ])
         .run(tauri::generate_context!())

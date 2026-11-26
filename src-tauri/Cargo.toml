@@ -1,6 +1,6 @@
 [package]
 name = "aetherplay"
-version = "0.3.0"
+version = "0.3.1"
 description = "Client desktop pour RomM"
 authors = ["Anthares74"]
 edition = "2024"
@@ -19,7 +19,7 @@ tauri-plugin-dialog = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["fs", "io-util", "process", "rt", "net", "sync", "macros", "time"] }
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "stream", "multipart", "cookies"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "stream", "multipart", "cookies", "http2", "gzip", "brotli", "deflate"] }
 futures-util = "0.3"
 zip = { version = "9.8.2", default-features = false, features = ["deflate"] }
 chrono = { version = "0.4.45", default-features = false, features = ["serde", "std", "clock"] }

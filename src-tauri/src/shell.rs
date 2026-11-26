@@ -131,6 +131,31 @@ fn is_server_path(path: &str) -> bool {
     ["/api/", "/openapi.json", "/ws", "/netplay"].iter().any(|p| path.starts_with(p))
 }
 
+/// Bundled interface files, read from disk once.
+static STATIC: LazyLock<std::sync::Mutex<std::collections::HashMap<PathBuf, Arc<Vec<u8>>>>> =
+    LazyLock::new(Default::default);
+
+fn read_static(file: &std::path::Path) -> Option<Arc<Vec<u8>>> {
+    let mut cache = STATIC.lock().expect("static lock");
+    if let Some(bytes) = cache.get(file) {
+        return Some(bytes.clone());
+    }
+    let bytes = Arc::new(std::fs::read(file).ok()?);
+    cache.insert(file.to_path_buf(), bytes.clone());
+    Some(bytes)
+}
+
+fn static_response(file: &std::path::Path, content_type: &str, immutable: bool) -> Option<http::Response<Vec<u8>>> {
+    let bytes = read_static(file)?;
+    http::Response::builder()
+        .status(200)
+        .header(http::header::CONTENT_TYPE, content_type)
+        // Build files carry a content hash in their name: cache them for good.
+        .header(http::header::CACHE_CONTROL, if immutable { "public, max-age=31536000, immutable" } else { "no-cache" })
+        .body(bytes.as_ref().clone())
+        .ok()
+}
+
 /// A file of the bundled interface, or index.html for client-side routes.
 fn serve_static(app: &AppHandle, path: &str) -> Option<http::Response<Vec<u8>>> {
     let root = ui_root(app)?;
@@ -140,14 +165,41 @@ fn serve_static(app: &AppHandle, path: &str) -> Option<http::Response<Vec<u8>>> 
     }
     let file = if rel.is_empty() { root.join("index.html") } else { root.join(&rel) };
     if file.is_file() {
-        return Some(respond(200, mime(&file), std::fs::read(&file).ok()?));
+        return static_response(&file, mime(&file), rel.starts_with("assets/"));
     }
     // Client-side route (no extension, not a server asset): the SPA shell.
     let last = rel.rsplit('/').next().unwrap_or_default();
     if !rel.starts_with("assets/") && !last.contains('.') {
-        return Some(respond(200, "text/html; charset=utf-8", std::fs::read(root.join("index.html")).ok()?));
+        return static_response(&root.join("index.html"), "text/html; charset=utf-8", false);
     }
     None
+}
+
+/// Server images (covers, screenshots…) kept on disk: a library of thousands
+/// of games is scrolled without downloading its covers again. RomM puts a
+/// `?ts=` version in their URLs, part of the cache key.
+fn image_cache_file(app: &AppHandle, path: &str, path_and_query: &str) -> Option<PathBuf> {
+    if !path.starts_with("/assets/romm/resources/") {
+        return None;
+    }
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    path_and_query.hash(&mut h);
+    let ext = std::path::Path::new(path).extension().and_then(|e| e.to_str()).unwrap_or("bin");
+    Some(image_cache_dir(app)?.join(format!("{:016x}.{ext}", h.finish())))
+}
+
+pub fn image_cache_dir(app: &AppHandle) -> Option<PathBuf> {
+    Some(app.path().app_cache_dir().ok()?.join("images"))
+}
+
+fn image_response(path: &str, bytes: Vec<u8>) -> http::Response<Vec<u8>> {
+    http::Response::builder()
+        .status(200)
+        .header(http::header::CONTENT_TYPE, mime(std::path::Path::new(path)))
+        .header(http::header::CACHE_CONTROL, "public, max-age=604800")
+        .body(bytes)
+        .expect("valid response")
 }
 
 async fn proxy(app: &AppHandle, req: http::Request<Vec<u8>>) -> Result<http::Response<Vec<u8>>, String> {
@@ -158,6 +210,12 @@ async fn proxy(app: &AppHandle, req: http::Request<Vec<u8>>) -> Result<http::Res
     let path = req.uri().path().to_string();
     let pq = req.uri().path_and_query().map_or(path.clone(), |p| p.as_str().to_string());
     let method = reqwest::Method::from_bytes(req.method().as_str().as_bytes()).map_err(|e| e.to_string())?;
+    let cached_image = (method == reqwest::Method::GET).then(|| image_cache_file(app, &path, &pq)).flatten();
+    if let Some(file) = &cached_image
+        && let Ok(bytes) = tokio::fs::read(file).await
+    {
+        return Ok(image_response(&path, bytes));
+    }
     let (http, jar) = session();
     let url = format!("{}{pq}", cfg.server_url);
     let mut rb = http.request(method.clone(), &url);
@@ -218,6 +276,15 @@ async fn proxy(app: &AppHandle, req: http::Request<Vec<u8>>) -> Result<http::Res
         }
     }
     let body = res.bytes().await.map_err(|e| e.to_string())?.to_vec();
+    if status == reqwest::StatusCode::OK
+        && let Some(file) = cached_image
+    {
+        if let Some(dir) = file.parent() {
+            let _ = tokio::fs::create_dir_all(dir).await;
+        }
+        let _ = tokio::fs::write(&file, &body).await;
+        return Ok(image_response(&path, body));
+    }
     out.body(body).map_err(|e| e.to_string())
 }
 

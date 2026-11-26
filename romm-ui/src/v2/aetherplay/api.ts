@@ -80,6 +80,8 @@ export const app = {
   phoneStatus: () => invoke<PhoneStatus>("phone_status"),
   phoneForget: () => invoke<void>("phone_forget"),
   installVigem: () => invoke<void>("install_vigem"),
+  imageCacheSize: () => invoke<number>("image_cache_size"),
+  imageCacheClear: () => invoke<void>("image_cache_clear"),
   onInstallProgress: (handler: (p: { id: string; done: number; total: number }) => void) =>
     tauri().event.listen<{ id: string; done: number; total: number }>("install-progress", (e) => handler(e.payload)),
 };
