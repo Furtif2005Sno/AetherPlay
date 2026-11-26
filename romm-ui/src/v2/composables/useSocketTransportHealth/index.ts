@@ -74,7 +74,9 @@ export function useSocketTransportHealth() {
     install();
   }
 
-  const isWebSocketDegraded = computed(() => websocketDegraded.value);
+  // AetherPlay: never surfaced; the socket connects over polling through the
+  // app's proxy and recovers on its own, the warning only alarms users.
+  const isWebSocketDegraded = computed(() => !isAetherPlay() && websocketDegraded.value);
 
   function retryWebSocket() {
     if (socket.connected) {
