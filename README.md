@@ -26,7 +26,7 @@ npm run tauri build    # générer l'installeur
 - [x] Bibliothèque par plateforme, covers, recherche
 - [x] Téléchargement avec progression + cache local
 - [x] Lancement de l'émulateur configuré (RetroArch avec cores par plateforme)
-- [ ] ROMs multi-fichiers (zip à extraire)
+- [x] ROMs multi-fichiers : zip extrait, choix auto du fichier (m3u/cue/chd/iso…, EBOOT.BIN PS3, plus gros .nsp Switch), .m3u généré pour les multi-disques
 - [x] Synchronisation des sauvegardes avec RomM (restauration avant la partie, envoi après) : dossiers par émulateur dans `catalog.json`, à vérifier sur chaque émulateur
 - [x] Installation automatique des émulateurs (assistant au premier lancement, sources dans `sources.json`) ; cores RetroArch téléchargés à la demande. Dolphin et Eden : installation manuelle
 - [ ] Choix de l'émulateur par plateforme

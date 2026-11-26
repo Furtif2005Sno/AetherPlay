@@ -2,6 +2,7 @@ mod config;
 mod emulators;
 mod install;
 mod romm;
+mod roms;
 mod saves;
 
 use serde::Serialize;
@@ -122,19 +123,24 @@ struct Exited {
 async fn play(app: AppHandle, rom_id: u64) -> Result<(), String> {
     let client = client(&app)?;
     let rom = client.rom(rom_id).await?;
-    if rom.multi {
-        return Err("Les ROMs multi-fichiers ne sont pas encore supportées".into());
-    }
     let cfg = config::load(&app);
     let (emu, exe) = emulators::resolve(&rom.platform_slug, &cfg.emulator_paths)
         .ok_or_else(|| format!("Aucun émulateur configuré pour « {} »", rom.platform_slug))?;
 
+    // The ROM file, or for multi-file ROMs the folder they are extracted into.
     let dest = rom_path(&app, &rom)?;
-    let cached = std::fs::metadata(&dest).is_ok_and(|m| rom.fs_size_bytes == 0 || m.len() == rom.fs_size_bytes);
+    let cached = if rom.multi {
+        dest.join(roms::MARKER).exists()
+    } else {
+        std::fs::metadata(&dest).is_ok_and(|m| rom.fs_size_bytes == 0 || m.len() == rom.fs_size_bytes)
+    };
     if !cached {
+        // Multi-file ROMs arrive as a zip, extracted below.
+        let download_to =
+            if rom.multi { dest.with_file_name(format!("{}.download.zip", rom.fs_name)) } else { dest.clone() };
         let mut last = 0u64;
         client
-            .download(&rom, &dest, |done, total| {
+            .download(&rom, &download_to, |done, total| {
                 // Throttle events to roughly every 1 MiB.
                 if done - last >= 1 << 20 || done == total {
                     last = done;
@@ -142,9 +148,16 @@ async fn play(app: AppHandle, rom_id: u64) -> Result<(), String> {
                 }
             })
             .await?;
+        if rom.multi {
+            let (zip, dir) = (download_to.clone(), dest.clone());
+            let res = tauri::async_runtime::spawn_blocking(move || roms::extract(&zip, &dir)).await;
+            let _ = std::fs::remove_file(&download_to);
+            res.map_err(|e| e.to_string())?.map_err(|e| format!("Extraction de la ROM : {e}"))?;
+        }
     }
+    let target = if rom.multi { roms::launch_target(&dest, &rom.fs_name)? } else { dest.clone() };
 
-    let save_dirs = emu.save_dirs(exe, &dest, &path_vars(&app)?);
+    let save_dirs = emu.save_dirs(exe, &target, &path_vars(&app)?);
     let mut index = saves::Index::load(app.path().app_local_data_dir().map_err(|e| e.to_string())?.join("saves-index.json"));
     if !save_dirs.is_empty() {
         sync_event(&app, rom_id, "restoring", None);
@@ -160,7 +173,7 @@ async fn play(app: AppHandle, rom_id: u64) -> Result<(), String> {
     }
 
     let started = std::time::SystemTime::now();
-    let mut child = emulators::command(emu, exe, &rom.platform_slug, &dest)?
+    let mut child = emulators::command(emu, exe, &rom.platform_slug, &target)?
         .spawn()
         .map_err(|e| format!("Impossible de lancer {} : {e}", emu.name))?;
     tauri::async_runtime::spawn(async move {

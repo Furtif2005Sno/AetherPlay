@@ -159,7 +159,7 @@ pub async fn upload(
     emu: &str,
     core: Option<&str>,
     dirs: &[PathBuf],
-    rom_file: &Path,
+    rom_root: &Path,
     started: SystemTime,
     index: &mut Index,
 ) -> Result<bool, String> {
@@ -167,7 +167,8 @@ pub async fn upload(
     let since = started - std::time::Duration::from_secs(1);
     let changed: Vec<String> = changed_since(dirs, since)
         .into_iter()
-        .filter(|k| resolve(dirs, k).is_some_and(|p| p != rom_file))
+        // Never treat the ROM itself (file or extracted folder) as a save.
+        .filter(|k| resolve(dirs, k).is_some_and(|p| !p.starts_with(rom_root)))
         .collect();
     if changed.is_empty() {
         return Ok(false);
