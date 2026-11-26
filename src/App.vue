@@ -5,9 +5,10 @@ import Login from "./components/Login.vue";
 import Library from "./components/Library.vue";
 import Emulators from "./components/Emulators.vue";
 import Setup from "./components/Setup.vue";
+import Storage from "./components/Storage.vue";
 
 const settings = ref<Settings | null>(null);
-const view = ref<"library" | "emulators">("library");
+const view = ref<"library" | "emulators" | "storage">("library");
 const editingServer = ref(false);
 const setupDone = ref(localStorage.getItem("setupDone") === "1");
 
@@ -37,13 +38,15 @@ onMounted(refresh);
         <strong class="logo">RomM <span>Desktop</span></strong>
         <button class="btn" :class="{ primary: view === 'library' }" @click="view = 'library'">Bibliothèque</button>
         <button class="btn" :class="{ primary: view === 'emulators' }" @click="view = 'emulators'">Émulateurs</button>
+        <button class="btn" :class="{ primary: view === 'storage' }" @click="view = 'storage'">Stockage</button>
         <span class="spacer" />
         <button class="btn" :title="settings.server_url" @click="editingServer = true">{{ settings.username }}</button>
       </nav>
       <div class="content">
         <Setup v-if="!setupDone" @done="finishSetup" />
         <Library v-else-if="view === 'library'" />
-        <Emulators v-else :paths="settings.emulator_paths" @changed="refresh" />
+        <Emulators v-else-if="view === 'emulators'" :settings="settings" @changed="refresh" />
+        <Storage v-else />
       </div>
     </div>
   </template>

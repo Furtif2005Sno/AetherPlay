@@ -12,6 +12,12 @@ pub struct Config {
     /// Emulator id -> executable (or .app bundle on macOS).
     #[serde(default)]
     pub emulator_paths: HashMap<String, String>,
+    /// Platform slug -> preferred emulator id (otherwise catalog order).
+    #[serde(default)]
+    pub platform_emulators: HashMap<String, String>,
+    /// Emulator id -> save folder overriding the catalog default.
+    #[serde(default)]
+    pub save_dirs: HashMap<String, String>,
 }
 
 fn file(app: &AppHandle) -> Result<PathBuf, String> {

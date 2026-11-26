@@ -37,6 +37,12 @@
     "macos": { "github": "xemu-project/xemu", "prerelease": true, "asset": "(?i)macos.*\\.zip$" } },
   "xenia": { "exe": "^xenia_canary\\.exe$",
     "windows": { "github": "xenia-canary/xenia-canary-releases", "asset": "^xenia_canary_windows\\.zip$" } },
+  "dolphin": { "exe": "^Dolphin\\.exe$",
+    "windows": { "page": "https://dolphin-emu.org/download/", "asset": "/dolphin-[\\w.]+-x64\\.7z$" },
+    "macos": { "page": "https://dolphin-emu.org/download/", "asset": "/dolphin-[\\w.]+-universal\\.dmg$" } },
+  "eden": { "exe": "^eden\\.exe$",
+    "windows": { "forgejo": "git.eden-emu.dev/eden-emu/eden", "asset": "^Eden-Windows-.*-amd64-msvc-standard\\.zip$" },
+    "macos": { "forgejo": "git.eden-emu.dev/eden-emu/eden", "asset": "^Eden-macOS-.*\\.dmg$" } },
   "retroarch": { "exe": "^retroarch\\.exe$",
     "windows": { "url": "https://buildbot.libretro.com/nightly/windows/x86_64/RetroArch.7z" },
     "macos": { "url": "https://buildbot.libretro.com/nightly/apple/osx/universal/RetroArch_Metal.dmg" } }

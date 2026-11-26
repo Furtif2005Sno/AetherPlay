@@ -32,6 +32,12 @@ struct OsSource {
     prerelease: bool,
     #[serde(default)]
     url: Option<String>,
+    /// Forgejo/Gitea repo as `host/owner/repo` (same release API shape as GitHub).
+    #[serde(default)]
+    forgejo: Option<String>,
+    /// HTML download page: first link matching `asset`.
+    #[serde(default)]
+    page: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -68,11 +74,28 @@ async fn locate(src: &OsSource) -> Result<(String, String), String> {
         let name = url.rsplit('/').next().unwrap_or("download").to_string();
         return Ok((url.clone(), name));
     }
-    let repo = src.github.as_deref().ok_or("Source invalide")?;
     let pattern = Regex::new(src.asset.as_deref().unwrap_or(".")).map_err(err)?;
+    if let Some(page) = &src.page {
+        let html = http().get(page).send().await.map_err(err)?.text().await.map_err(err)?;
+        let links = Regex::new(r#"https?://[^"'\s<>]+"#).expect("regex");
+        return links
+            .find_iter(&html)
+            .map(|m| m.as_str())
+            .find(|u| pattern.is_match(u))
+            .map(|u| (u.to_string(), u.rsplit('/').next().unwrap_or("download").to_string()))
+            .ok_or_else(|| format!("Aucun lien compatible sur {page}"));
+    }
+    let (api, repo) = match (&src.github, &src.forgejo) {
+        (Some(repo), _) => (format!("https://api.github.com/repos/{repo}/releases?per_page=10"), repo.as_str()),
+        (None, Some(path)) => {
+            let (host, repo) = path.split_once('/').ok_or("Source invalide")?;
+            (format!("https://{host}/api/v1/repos/{repo}/releases?limit=10"), repo)
+        }
+        _ => return Err("Source invalide".into()),
+    };
     let skip = Regex::new(r"(?i)dbg|debug|symbols|\.pdb|\.sha\d*|\.sig$").expect("regex");
     let releases: Vec<Release> = http()
-        .get(format!("https://api.github.com/repos/{repo}/releases?per_page=10"))
+        .get(api)
         .send()
         .await
         .map_err(err)?

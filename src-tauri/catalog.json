@@ -23,9 +23,11 @@
   { "id": "azahar", "name": "Azahar", "platforms": ["3ds"], "args": ["{rom}"], "os": ["windows", "macos"],
     "saves": { "windows": ["{appdata}/Azahar/sdmc"], "macos": ["{home}/Library/Application Support/Azahar/sdmc"] } },
   { "id": "eden", "name": "Eden", "platforms": ["switch"], "args": ["-g", "{rom}"], "os": ["windows", "macos"],
-    "saves": { "windows": ["{appdata}/eden/nand/user/save"], "macos": ["{home}/Library/Application Support/eden/nand/user/save"] } },
+    "saves": { "windows": ["{appdata}/eden/nand/user/save"], "macos": ["{home}/Library/Application Support/eden/nand/user/save"] },
+    "config_ini": { "windows": "{appdata}/eden/config/qt-config.ini", "macos": "{home}/Library/Application Support/eden/config/qt-config.ini" } },
   { "id": "eglantine", "name": "Eglantine", "platforms": ["switch-2"], "args": ["-g", "{rom}"], "os": ["windows", "macos"], "experimental": true,
-    "saves": { "windows": ["{appdata}/eglantine/nand/user/save"], "macos": ["{home}/Library/Application Support/eglantine/nand/user/save"] } },
+    "saves": { "windows": ["{appdata}/eglantine/nand/user/save"], "macos": ["{home}/Library/Application Support/eglantine/nand/user/save"] },
+    "config_ini": { "windows": "{appdata}/eglantine/config/qt-config.ini", "macos": "{home}/Library/Application Support/eglantine/config/qt-config.ini" } },
   { "id": "flycast", "name": "Flycast", "platforms": ["dc"], "args": ["{rom}"], "os": ["windows", "macos"],
     "saves": { "windows": ["{exe_dir}/data"], "macos": ["{home}/Library/Application Support/Flycast"] } },
   { "id": "xemu", "name": "xemu", "platforms": ["xbox"], "args": ["-dvd_path", "{rom}"], "os": ["windows", "macos"] },
@@ -34,12 +36,12 @@
   {
     "id": "retroarch", "name": "RetroArch", "args": ["-L", "{core}", "{rom}"], "os": ["windows", "macos"],
     "saves": { "windows": ["{exe_dir}/saves"], "macos": ["{home}/Library/Application Support/RetroArch/saves"] },
-    "platforms": ["nes", "snes", "n64", "gb", "gbc", "gba", "genesis-slash-megadrive", "sms", "gamegear", "turbografx16--1", "neogeoaes", "arcade", "atari2600", "saturn", "psx"],
+    "platforms": ["nes", "snes", "n64", "gb", "gbc", "gba", "genesis-slash-megadrive", "sms", "gamegear", "turbografx16--1", "neogeoaes", "arcade", "atari2600", "saturn", "psx", "nds", "psp", "dc"],
     "cores": {
       "nes": "mesen", "snes": "snes9x", "n64": "mupen64plus_next", "gb": "gambatte", "gbc": "gambatte", "gba": "mgba",
       "genesis-slash-megadrive": "genesis_plus_gx", "sms": "genesis_plus_gx", "gamegear": "genesis_plus_gx",
       "turbografx16--1": "mednafen_pce_fast", "neogeoaes": "fbneo", "arcade": "fbneo", "atari2600": "stella",
-      "saturn": "mednafen_saturn", "psx": "swanstation"
+      "saturn": "mednafen_saturn", "psx": "swanstation", "nds": "melondsds", "psp": "ppsspp", "dc": "flycast"
     }
   }
 ]

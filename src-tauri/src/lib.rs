@@ -1,3 +1,4 @@
+mod cache;
 mod config;
 mod emulators;
 mod install;
@@ -24,6 +25,8 @@ struct Settings {
     username: String,
     logged_in: bool,
     emulator_paths: HashMap<String, String>,
+    platform_emulators: HashMap<String, String>,
+    save_dirs: HashMap<String, String>,
 }
 
 #[tauri::command]
@@ -34,6 +37,8 @@ fn get_settings(app: AppHandle) -> Settings {
         server_url: cfg.server_url,
         username: cfg.username,
         emulator_paths: cfg.emulator_paths,
+        platform_emulators: cfg.platform_emulators,
+        save_dirs: cfg.save_dirs,
     }
 }
 
@@ -70,6 +75,60 @@ fn set_emulator_path(app: AppHandle, id: String, path: Option<String>) -> Result
         None => cfg.emulator_paths.remove(&id),
     };
     config::save(&app, &cfg)
+}
+
+#[tauri::command]
+fn set_platform_emulator(app: AppHandle, platform: String, id: Option<String>) -> Result<(), String> {
+    let mut cfg = config::load(&app);
+    match id {
+        Some(id) => cfg.platform_emulators.insert(platform, id),
+        None => cfg.platform_emulators.remove(&platform),
+    };
+    config::save(&app, &cfg)
+}
+
+#[tauri::command]
+fn set_save_dir(app: AppHandle, id: String, path: Option<String>) -> Result<(), String> {
+    let mut cfg = config::load(&app);
+    match path {
+        Some(p) => cfg.save_dirs.insert(id, p),
+        None => cfg.save_dirs.remove(&id),
+    };
+    config::save(&app, &cfg)
+}
+
+/// Save folders in use per emulator (override or default), for display.
+#[tauri::command]
+fn save_dirs(app: AppHandle) -> Result<HashMap<String, Vec<String>>, String> {
+    let cfg = config::load(&app);
+    let vars = path_vars(&app)?;
+    Ok(emulators::catalog()
+        .iter()
+        .map(|e| {
+            let exe = cfg.emulator_paths.get(&e.id).map(String::as_str).unwrap_or("");
+            let dirs = e.save_dirs(exe, None, &vars, &cfg.save_dirs);
+            (e.id.clone(), dirs.iter().map(|d| d.to_string_lossy().into_owned()).collect())
+        })
+        .collect())
+}
+
+fn cache_root(app: &AppHandle) -> Result<PathBuf, String> {
+    Ok(app.path().app_local_data_dir().map_err(|e| e.to_string())?.join("roms"))
+}
+
+#[tauri::command]
+fn cache_list(app: AppHandle) -> Result<Vec<cache::Entry>, String> {
+    Ok(cache::list(&cache_root(&app)?))
+}
+
+#[tauri::command]
+fn cache_delete(app: AppHandle, path: String) -> Result<(), String> {
+    cache::delete(&cache_root(&app)?, &path)
+}
+
+#[tauri::command]
+fn cache_clear(app: AppHandle) -> Result<(), String> {
+    cache::clear(&cache_root(&app)?)
 }
 
 #[tauri::command]
@@ -124,7 +183,7 @@ async fn play(app: AppHandle, rom_id: u64) -> Result<(), String> {
     let client = client(&app)?;
     let rom = client.rom(rom_id).await?;
     let cfg = config::load(&app);
-    let (emu, exe) = emulators::resolve(&rom.platform_slug, &cfg.emulator_paths)
+    let (emu, exe) = emulators::resolve(&rom.platform_slug, &cfg.emulator_paths, &cfg.platform_emulators)
         .ok_or_else(|| format!("Aucun émulateur configuré pour « {} »", rom.platform_slug))?;
 
     // The ROM file, or for multi-file ROMs the folder they are extracted into.
@@ -157,7 +216,13 @@ async fn play(app: AppHandle, rom_id: u64) -> Result<(), String> {
     }
     let target = if rom.multi { roms::launch_target(&dest, &rom.fs_name)? } else { dest.clone() };
 
-    let save_dirs = emu.save_dirs(exe, &target, &path_vars(&app)?);
+    let vars = path_vars(&app)?;
+    // Switch: let Eden/Eglantine pick up updates/DLC shipped next to the base game.
+    if rom.multi && let Some(ini) = emu.config_ini(exe, &vars) {
+        emulators::register_external_content(&ini, &dest)
+            .map_err(|e| format!("Configuration des mises à jour/DLC : {e}"))?;
+    }
+    let save_dirs = emu.save_dirs(exe, Some(&target), &vars, &cfg.save_dirs);
     let mut index = saves::Index::load(app.path().app_local_data_dir().map_err(|e| e.to_string())?.join("saves-index.json"));
     if !save_dirs.is_empty() {
         sync_event(&app, rom_id, "restoring", None);
@@ -242,6 +307,12 @@ pub fn run() {
             catalog,
             set_emulator_path,
             installable,
+            set_platform_emulator,
+            set_save_dir,
+            save_dirs,
+            cache_list,
+            cache_delete,
+            cache_clear,
             install_emulator,
             play
         ])
