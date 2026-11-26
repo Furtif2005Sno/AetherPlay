@@ -1,5 +1,6 @@
 mod cache;
 mod config;
+mod controller;
 mod emulators;
 mod gamepad;
 mod import;
@@ -252,6 +253,27 @@ async fn launch(app: AppHandle, rom_id: u64, fullscreen: bool) -> Result<LaunchR
     if rom.multi && let Some(ini) = emu.config_ini(exe, &vars) {
         emulators::register_external_content(&ini, &dest)
             .map_err(|e| fail("launch-failed", format!("Configuration des mises à jour/DLC : {e}")))?;
+    }
+    // Eden/Eglantine start keyboard-only: point player 1 at the connected pad.
+    if let Some(ini) = emu.config_ini(exe, &vars) {
+        let retroarch = cfg.emulator_paths.get("retroarch").map(PathBuf::from);
+        match controller::find_sdl(std::path::Path::new(exe), retroarch.as_deref()) {
+            Some(lib) => {
+                let res = tauri::async_runtime::spawn_blocking(move || {
+                    let pads = controller::detect(&lib)?;
+                    controller::apply(&ini, &pads)
+                })
+                .await
+                .map_err(|e| e.to_string())
+                .and_then(|r| r);
+                match res {
+                    Ok(Some(name)) => shell::log(&app, &format!("manette : joueur 1 -> {name}")),
+                    Ok(None) => shell::log(&app, "manette : configuration inchangée"),
+                    Err(e) => shell::log(&app, &format!("manette : {e}")),
+                }
+            }
+            None => shell::log(&app, "manette : SDL3 introuvable, configuration inchangée"),
+        }
     }
     let save_dirs = emu.save_dirs(exe, Some(&target), &vars, &cfg.save_dirs);
     shell::log(&app, &format!("launch rom={rom_id} ({}) : {} via {}, saves {:?}", rom.fs_name, rom.platform_slug, emu.name, save_dirs));
