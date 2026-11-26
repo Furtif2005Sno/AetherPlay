@@ -3,7 +3,9 @@
 //!   needs the keyboard (works while the emulator has focus: XInput on Windows);
 //! * on macOS and Linux the interface is fed the pad state ("aep-gamepad"
 //!   events, turned into navigator.getGamepads() by bridge.js), since their
-//!   webviews do not reliably expose controllers. Windows' WebView2 does.
+//!   webviews do not reliably expose controllers. Windows' WebView2 does, so
+//!   there it only gets the Android controller when no Bluetooth link or
+//!   virtual pad makes it visible to Windows.
 
 use crate::config;
 use gilrs::{Axis, Button, Gamepad, Gilrs};
@@ -16,19 +18,21 @@ use tauri::{AppHandle, Emitter, Manager};
 
 /// Process id of the emulator currently running, if any.
 static RUNNING: Mutex<Option<u32>> = Mutex::new(None);
-/// Android controllers' state by connection (buttons in W3C order, axes), see phone.rs.
-static REMOTE: Mutex<Vec<(u64, u32, [f32; 4])>> = Mutex::new(Vec::new());
+/// Android controllers by connection: buttons (W3C order), axes, and whether
+/// the interface must get them from AetherPlay (see phone.rs).
+type Remote = (u64, u32, [f32; 4], bool);
+static REMOTE: Mutex<Vec<Remote>> = Mutex::new(Vec::new());
 
-pub fn set_remote(phone: u64, state: Option<(u32, [f32; 4])>) {
+pub fn set_remote(phone: u64, state: Option<(u32, [f32; 4])>, ui: bool) {
     let mut all = REMOTE.lock().expect("remote lock");
-    all.retain(|(id, _, _)| *id != phone);
+    all.retain(|(id, ..)| *id != phone);
     if let Some((b, a)) = state {
-        all.push((phone, b, a));
+        all.push((phone, b, a, ui));
     }
 }
 
-fn remote() -> Vec<(u32, [f32; 4])> {
-    REMOTE.lock().expect("remote lock").iter().map(|(_, b, a)| (*b, *a)).collect()
+fn remote(ui_only: bool) -> Vec<(u32, [f32; 4])> {
+    REMOTE.lock().expect("remote lock").iter().filter(|r| !ui_only || r.3).map(|r| (r.1, r.2)).collect()
 }
 
 /// Closes the running game (the phone's "Quitter le jeu" button).
@@ -110,10 +114,12 @@ fn state_of(g: &Gamepad) -> PadState {
     }
 }
 
-/// What the interface sees: every controller merged into one, the phone included.
-fn ui_state(gilrs: &Gilrs, live: bool) -> PadState {
-    let mut pads: Vec<PadState> = gilrs.gamepads().map(|(_, g)| state_of(&g)).collect();
-    for (b, axes) in remote() {
+/// What the interface sees: controllers merged into one, the phone included.
+/// `local`: also the controllers read by gilrs (not on Windows).
+fn ui_state(gilrs: &Gilrs, live: bool, local: bool) -> PadState {
+    let mut pads: Vec<PadState> =
+        if local { gilrs.gamepads().map(|(_, g)| state_of(&g)).collect() } else { Vec::new() };
+    for (b, axes) in remote(true) {
         pads.push(PadState {
             connected: true,
             id: "AetherPlay Android".into(),
@@ -144,12 +150,11 @@ fn ui_state(gilrs: &Gilrs, live: bool) -> PadState {
 pub fn spawn_watcher(app: AppHandle) {
     std::thread::spawn(move || {
         let Ok(mut gilrs) = Gilrs::new() else { return };
-        let feed_ui = !cfg!(windows);
         let mut held_since: Option<Instant> = None;
         let mut sent = PadState::default();
         loop {
             while gilrs.next_event_blocking(Some(Duration::from_millis(16))).is_some() {}
-            let phone_combo = remote().iter().any(|(b, _)| b & (1 << 8) != 0 && b & (1 << 9) != 0);
+            let phone_combo = remote(false).iter().any(|(b, _)| b & (1 << 8) != 0 && b & (1 << 9) != 0);
             let combo = phone_combo
                 || gilrs.gamepads().any(|(_, g)| g.is_pressed(Button::Select) && g.is_pressed(Button::Start));
             match (combo, held_since) {
@@ -164,14 +169,15 @@ pub fn spawn_watcher(app: AppHandle) {
                 _ => {}
             }
 
-            if feed_ui {
-                // Only while the interface is in front: never drive it from a game.
-                let focused = app.get_webview_window("main").and_then(|w| w.is_focused().ok()).unwrap_or(false);
-                let state = ui_state(&gilrs, focused && !is_running());
-                if state != sent {
-                    let _ = app.emit_to("main", "aep-gamepad", &state);
-                    sent = state;
-                }
+            // Never drive the interface from a game; local pads only while it
+            // is in front (the phone is held for AetherPlay anyway).
+            let focused = app.get_webview_window("main").and_then(|w| w.is_focused().ok()).unwrap_or(false);
+            let local = !cfg!(windows);
+            let live = !is_running() && (focused || !remote(true).is_empty());
+            let state = ui_state(&gilrs, live, local);
+            if state != sent {
+                let _ = app.emit_to("main", "aep-gamepad", &state);
+                sent = state;
             }
         }
     });

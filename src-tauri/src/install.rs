@@ -260,6 +260,42 @@ pub async fn install(
     result
 }
 
+/// Windows: installs ViGEmBus, the free driver behind the virtual Xbox
+/// controller the Android app uses over Wi-Fi. Its installer asks for
+/// administrator rights (UAC) and shows its own window.
+#[cfg(windows)]
+pub async fn install_vigem(dir: &Path) -> Result<(), String> {
+    let src = OsSource {
+        github: Some("nefarius/ViGEmBus".into()),
+        asset: Some(r"^ViGEmBus_.*\.exe$".into()),
+        prerelease: false,
+        url: None,
+        forgejo: None,
+        page: None,
+    };
+    let (url, name) = locate(&src).await?;
+    tokio::fs::create_dir_all(dir).await.map_err(err)?;
+    let exe = dir.join(name);
+    download(&url, &exe, |_, _| {}).await?;
+    let exe2 = exe.clone();
+    let status = tokio::task::spawn_blocking(move || {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        // Start-Process -Verb RunAs: the installer requires elevation.
+        Command::new("powershell")
+            .args(["-NoProfile", "-Command", "Start-Process", "-FilePath"])
+            .arg(format!("'{}'", exe2.display()))
+            .args(["-Verb", "RunAs", "-Wait"])
+            .creation_flags(CREATE_NO_WINDOW)
+            .status()
+    })
+    .await
+    .map_err(err)?
+    .map_err(err)?;
+    let _ = tokio::fs::remove_file(&exe).await;
+    if status.success() { Ok(()) } else { Err("Installation annulée".into()) }
+}
+
 /// Downloads a missing RetroArch core from the libretro buildbot.
 pub async fn ensure_core(core_path: &Path) -> Result<(), String> {
     if core_path.exists() {

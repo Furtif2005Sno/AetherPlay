@@ -80,7 +80,14 @@ fn token() -> String {
 
 /// Pairing code and connected phones, for the settings page.
 pub fn status() -> Value {
-    json!({ "pin": SHARED.pin, "port": PORT, "phones": SHARED.phones.lock().expect("phones").clone() })
+    json!({
+        "pin": SHARED.pin,
+        "port": PORT,
+        "phones": SHARED.phones.lock().expect("phones").clone(),
+        // Can Wi-Fi input reach the games (virtual controller)?
+        "virtual": virtual_pad::available(),
+        "os": crate::emulators::CURRENT_OS,
+    })
 }
 
 fn publish(msg: String) {
@@ -153,7 +160,12 @@ async fn serve(app: &AppHandle, stream: TcpStream) -> Result<(), String> {
 
     // Pairing: a known token, or the code shown in AetherPlay.
     let name = loop {
-        let Some(Ok(Message::Text(text))) = rx.next().await else { return Ok(()) };
+        // The phone pings every few seconds: wait for the code past those.
+        let text = match rx.next().await {
+            Some(Ok(Message::Text(text))) => text,
+            Some(Ok(Message::Close(_)) | Err(_)) | None => return Ok(()),
+            Some(Ok(_)) => continue,
+        };
         let msg: Value = serde_json::from_str(&text).map_err(|e| e.to_string())?;
         if msg["t"] != "hello" {
             continue;
@@ -190,6 +202,7 @@ async fn serve(app: &AppHandle, stream: TcpStream) -> Result<(), String> {
         shell::log(app, &format!("manette Android : pas de manette virtuelle ({e}), Bluetooth nécessaire pour les jeux"));
     }
 
+    let mut last_try = std::time::Instant::now();
     let result: Result<(), String> = async {
         loop {
             tokio::select! {
@@ -204,9 +217,20 @@ async fn serve(app: &AppHandle, stream: TcpStream) -> Result<(), String> {
                             for (i, a) in msg["a"].as_array().into_iter().flatten().take(4).enumerate() {
                                 axes[i] = a.as_f64().unwrap_or(0.0).clamp(-1.0, 1.0) as f32;
                             }
-                            gamepad::set_remote(me.id, Some((buttons, axes)));
                             // Bluetooth already feeds the games: no second controller.
                             let bluetooth = msg["bt"].as_bool().unwrap_or(false);
+                            // On Windows the interface sees Bluetooth and virtual pads
+                            // by itself; otherwise AetherPlay hands it the phone state.
+                            let ui = !cfg!(windows) || (!bluetooth && virtual_pad.is_err());
+                            gamepad::set_remote(me.id, Some((buttons, axes)), ui);
+                            // Driver installed meanwhile (Windows): pick it up.
+                            if virtual_pad.is_err() && !bluetooth && last_try.elapsed() > std::time::Duration::from_secs(5) {
+                                last_try = std::time::Instant::now();
+                                virtual_pad = virtual_pad::VirtualPad::new();
+                                if virtual_pad.is_ok() {
+                                    tx.send(send(json!({ "t": "virtual", "ok": true }))).await.map_err(|e| e.to_string())?;
+                                }
+                            }
                             if let Ok(pad) = &mut virtual_pad {
                                 pad.update(if bluetooth { 0 } else { buttons }, if bluetooth { [0.0; 4] } else { axes });
                             }
@@ -225,7 +249,7 @@ async fn serve(app: &AppHandle, stream: TcpStream) -> Result<(), String> {
     }
     .await;
 
-    gamepad::set_remote(me.id, None);
+    gamepad::set_remote(me.id, None, false);
     leave(me.id);
     shell::log(app, &format!("manette Android déconnectée : {name}"));
     result
@@ -259,6 +283,21 @@ mod virtual_pad {
 
     fn on(b: u32, i: u32) -> bool {
         b & (1 << i) != 0
+    }
+
+    #[cfg(windows)]
+    pub fn available() -> bool {
+        vigem_client::Client::connect().is_ok()
+    }
+
+    #[cfg(target_os = "linux")]
+    pub fn available() -> bool {
+        std::fs::OpenOptions::new().write(true).open("/dev/uinput").is_ok()
+    }
+
+    #[cfg(target_os = "macos")]
+    pub fn available() -> bool {
+        false
     }
 
     #[cfg(windows)]

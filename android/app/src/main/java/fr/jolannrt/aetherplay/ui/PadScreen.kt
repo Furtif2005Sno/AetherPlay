@@ -73,6 +73,8 @@ fun PadScreen(
     onQuitGame: () -> Unit,
     onSettings: () -> Unit,
     player: Int = 0,
+    /** AetherPlay can turn Wi-Fi input into a controller the games see. */
+    wifiInput: Boolean = true,
     tweaks: Map<Int, Tweak> = emptyMap(),
     onTweaks: (Map<Int, Tweak>) -> Unit = {},
 ) {
@@ -139,6 +141,19 @@ fun PadScreen(
             }
             IconButton(onClick = onSettings) { Icon(Icons.Filled.Settings, "Connexion", tint = Color.White) }
             Spacer(Modifier.width(260.dp))
+        }
+        if (!editing && game != null && !bluetooth && !wifiInput) {
+            Text(
+                "Les jeux ne reçoivent pas cette manette : connecte le téléphone en Bluetooth, " +
+                    "ou sur Windows installe le pilote dans AetherPlay (Réglages > AetherPlay > Manette Android).",
+                color = Color.White,
+                fontSize = 13.sp,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = 6.dp, start = 80.dp, end = 80.dp)
+                    .background(Color(0xCCB3261E), RoundedCornerShape(12.dp))
+                    .padding(horizontal = 12.dp, vertical = 6.dp),
+            )
         }
         if (editing) {
             Row(

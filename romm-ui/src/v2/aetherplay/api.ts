@@ -54,6 +54,9 @@ export interface PhoneStatus {
   pin: string;
   port: number;
   phones: { name: string; player: number }[];
+  /** Wi-Fi input can reach the games (virtual controller available). */
+  virtual: boolean;
+  os: "windows" | "macos" | "linux";
 }
 
 export const app = {
@@ -76,6 +79,7 @@ export const app = {
   openLog: () => invoke<void>("open_log"),
   phoneStatus: () => invoke<PhoneStatus>("phone_status"),
   phoneForget: () => invoke<void>("phone_forget"),
+  installVigem: () => invoke<void>("install_vigem"),
   onInstallProgress: (handler: (p: { id: string; done: number; total: number }) => void) =>
     tauri().event.listen<{ id: string; done: number; total: number }>("install-progress", (e) => handler(e.payload)),
 };

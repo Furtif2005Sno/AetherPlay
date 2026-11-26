@@ -28,6 +28,20 @@ let phoneTimer: ReturnType<typeof setInterval> | undefined;
 const refreshPhone = async () => {
   phone.value = await app.phoneStatus();
 };
+const installingVigem = ref(false);
+async function installVigem() {
+  installingVigem.value = true;
+  error.value = "";
+  try {
+    await app.installVigem();
+    notice.value = "Pilote installé : la manette Android pilote maintenant les jeux en Wi-Fi.";
+  } catch (e) {
+    error.value = String(e);
+  }
+  installingVigem.value = false;
+  await refreshPhone();
+}
+
 async function forgetPhones() {
   if (confirm("Oublier tous les téléphones associés ? Ils devront retaper le code.")) {
     await run(() => app.phoneForget());
@@ -199,6 +213,34 @@ onUnmounted(() => {
             Chaque téléphone connecté est un joueur : plusieurs téléphones = partie à plusieurs.
           </div>
         </div>
+      </div>
+      <div class="aep-row">
+        <div class="aep-row__info">
+          <div class="aep-row__title">
+            Manette en Wi-Fi pour les jeux :
+            {{ phone.virtual ? "disponible" : phone.os === "macos" ? "impossible sur Mac" : "indisponible" }}
+          </div>
+          <div class="aep-muted">
+            <template v-if="phone.virtual">Sans Bluetooth, le téléphone pilote aussi les jeux en Wi-Fi.</template>
+            <template v-else-if="phone.os === 'windows'">
+              Sans Bluetooth, le téléphone ne pilote que les menus. Pour les jeux en Wi-Fi, installe le pilote gratuit
+              ViGEmBus (Windows demandera l'autorisation), ou connecte le téléphone en Bluetooth.
+            </template>
+            <template v-else-if="phone.os === 'macos'">
+              macOS n'autorise pas les manettes virtuelles : connecte le téléphone en Bluetooth pour jouer.
+            </template>
+            <template v-else>Accès à /dev/uinput refusé : connecte le téléphone en Bluetooth pour jouer.</template>
+          </div>
+        </div>
+        <RBtn
+          v-if="!phone.virtual && phone.os === 'windows'"
+          size="small"
+          :loading="installingVigem"
+          prepend-icon="mdi-download"
+          @click="installVigem"
+        >
+          Installer le pilote
+        </RBtn>
       </div>
       <div v-for="p in phone.phones" :key="p.player" class="aep-row">
         <div class="aep-row__info">

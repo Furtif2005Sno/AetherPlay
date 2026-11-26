@@ -75,6 +75,7 @@ class MainActivity : ComponentActivity() {
             val token by link.token.collectAsState()
             val btStatus by hid.status.collectAsState()
             val player by link.player.collectAsState()
+            val wifiInput by link.wifiInput.collectAsState()
             var showPad by remember { mutableStateOf(false) }
 
             // Remember the pairing token AetherPlay issued.
@@ -104,6 +105,7 @@ class MainActivity : ComponentActivity() {
                 PadScreen(
                     layout = layout,
                     player = player,
+                    wifiInput = wifiInput,
                     tweaks = tweaks,
                     onTweaks = { tweaks = it; tweakStore.save(layout, it) },
                     game = game,

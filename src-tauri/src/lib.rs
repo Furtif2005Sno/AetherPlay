@@ -502,6 +502,23 @@ fn phone_status() -> serde_json::Value {
     phone::status()
 }
 
+/// Windows: installs the ViGEmBus driver (virtual controller for Wi-Fi input).
+#[tauri::command]
+async fn install_vigem(app: AppHandle) -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        let dir = app.path().app_local_data_dir().map_err(|e| e.to_string())?.join("downloads");
+        install::install_vigem(&dir).await?;
+        shell::log(&app, "manette Android : pilote ViGEmBus installé");
+        Ok(())
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = app;
+        Err("Uniquement sur Windows".into())
+    }
+}
+
 /// Forgets every paired phone (they will need the code again).
 #[tauri::command]
 fn phone_forget(app: AppHandle) -> Result<(), String> {
@@ -549,7 +566,8 @@ pub fn run() {
             import_save,
             open_log,
             phone_status,
-            phone_forget
+            phone_forget,
+            install_vigem
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
