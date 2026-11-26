@@ -161,15 +161,57 @@ pub fn register_external_content(ini: &Path, dir: &Path) -> Result<(), String> {
 fn executable(path: &str) -> Result<PathBuf, String> {
     let p = Path::new(path);
     if p.extension().is_some_and(|e| e == "app") {
-        let macos = p.join("Contents/MacOS");
-        return std::fs::read_dir(&macos)
-            .map_err(|e| format!("{}: {e}", macos.display()))?
-            .filter_map(Result::ok)
-            .map(|d| d.path())
-            .find(|f| f.is_file())
-            .ok_or_else(|| format!("Aucun exécutable dans {}", macos.display()));
+        return bundle_executable(p);
     }
     Ok(p.to_path_buf())
+}
+
+/// The binary a `.app` runs: `CFBundleExecutable` from Info.plist, else the
+/// file named after the bundle. `Contents/MacOS` may hold helpers and text
+/// files too (Eglantine ships `eden-cli` and `nx2_switches.txt` next to it).
+fn bundle_executable(app: &Path) -> Result<PathBuf, String> {
+    let macos = app.join("Contents/MacOS");
+    let declared = std::fs::read_to_string(app.join("Contents/Info.plist")).ok().and_then(|plist| {
+        let re = regex::Regex::new(r"<key>CFBundleExecutable</key>\s*<string>([^<]+)</string>").ok()?;
+        Some(re.captures(&plist)?[1].trim().to_string())
+    });
+    let stem = app.file_stem().map(|s| s.to_string_lossy().into_owned());
+    for name in declared.into_iter().chain(stem) {
+        let f = macos.join(&name);
+        if f.is_file() {
+            return Ok(f);
+        }
+    }
+    std::fs::read_dir(&macos)
+        .map_err(|e| format!("{}: {e}", macos.display()))?
+        .filter_map(Result::ok)
+        .map(|d| d.path())
+        .filter(|f| f.is_file())
+        .find(|f| {
+            let n = f.file_name().unwrap_or_default().to_string_lossy();
+            !n.starts_with('.') && !n.contains('.')
+        })
+        .ok_or_else(|| format!("Aucun exécutable dans {}", macos.display()))
+}
+
+#[cfg(test)]
+mod bundle_tests {
+    #[test]
+    fn picks_declared_executable_over_helpers() {
+        let app = std::env::temp_dir().join(format!("aep-test-{}/eglantine.app", std::process::id()));
+        let macos = app.join("Contents/MacOS");
+        std::fs::create_dir_all(&macos).unwrap();
+        for f in ["nx2_switches.txt", "._nx2_switches.txt", "eden-cli", "eglantine"] {
+            std::fs::write(macos.join(f), b"x").unwrap();
+        }
+        std::fs::write(
+            app.join("Contents/Info.plist"),
+            "<dict>\n<key>CFBundleExecutable</key>\n  <string>eglantine</string>\n</dict>",
+        )
+        .unwrap();
+        assert_eq!(super::bundle_executable(&app).unwrap(), macos.join("eglantine"));
+        let _ = std::fs::remove_dir_all(app.parent().unwrap());
+    }
 }
 
 fn core_path(exe: &Path, core: &str) -> PathBuf {
