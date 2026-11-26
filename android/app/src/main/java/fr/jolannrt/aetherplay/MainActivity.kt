@@ -66,6 +66,16 @@ class MainActivity : ComponentActivity() {
         // Test builds only: `adb shell am start ... --es preview snes` shows a layout without AetherPlay.
         val debuggable = applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE != 0
         val preview = intent.getStringExtra("preview")?.takeIf { debuggable }
+        // `--es screen 256x192`: a fake second screen (test pattern) in the preview.
+        val previewScreen = intent.getStringExtra("screen")?.takeIf { debuggable }
+            ?.split("x")?.mapNotNull { it.toIntOrNull() }?.takeIf { it.size == 2 }?.let { it[0] to it[1] }
+        val previewFrame = previewScreen?.let { (w, h) ->
+            android.graphics.Bitmap.createBitmap(w, h, android.graphics.Bitmap.Config.ARGB_8888).apply {
+                for (y in 0 until h) for (x in 0 until w) {
+                    setPixel(x, y, android.graphics.Color.rgb(x * 255 / w, y * 255 / h, if ((x / 16 + y / 16) % 2 == 0) 200 else 60))
+                }
+            }
+        }
 
         fun connect(server: Server) {
             prefs.edit().putString("server", server.name).apply()
@@ -81,6 +91,10 @@ class MainActivity : ComponentActivity() {
             val btStatus by hid.status.collectAsState()
             val player by link.player.collectAsState()
             val wifiInput by link.wifiInput.collectAsState()
+            val linkScreen by link.screen.collectAsState()
+            val linkFrame by link.frame.collectAsState()
+            val screenSize = previewScreen ?: linkScreen
+            val frame = previewFrame ?: linkFrame
             var showPad by remember { mutableStateOf(preview != null) }
             var backdrop by remember {
                 mutableStateOf(runCatching { Backdrop.valueOf(prefs.getString("backdrop", null)!!) }.getOrDefault(Backdrop.CONTROLLER))
@@ -108,13 +122,16 @@ class MainActivity : ComponentActivity() {
 
             val btConnected = btStatus is HidGamepad.Status.Connected
             if (showPad) {
-                val layout = layoutFor(game?.platform)
+                val layout = layoutFor(game?.platform, screen = screenSize != null)
                 var tweaks by remember(layout) { mutableStateOf(tweakStore.load(layout)) }
                 PadScreen(
                     layout = layout,
                     player = player,
                     wifiInput = wifiInput,
                     backdrop = backdrop,
+                    frame = frame,
+                    screenSize = screenSize,
+                    onTouch = link::sendTouch,
                     onBackdrop = { backdrop = it; prefs.edit().putString("backdrop", it.name).apply() },
                     tweaks = tweaks,
                     onTweaks = { tweaks = it; tweakStore.save(layout, it) },

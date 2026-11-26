@@ -1,6 +1,7 @@
 mod cache;
 mod config;
 mod controller;
+mod dualscreen;
 mod emulators;
 mod gamepad;
 mod import;
@@ -335,6 +336,27 @@ async fn launch(app: AppHandle, rom_id: u64, fullscreen: bool) -> Result<LaunchR
         install::ensure_core(&core).await.map_err(|e| fail("download-failed", e))?;
     }
 
+    // Second screen (DS bottom screen, Wii U GamePad) on the phone, Windows.
+    let mut dual = false;
+    if dualscreen::supported(&emu.id) {
+        let on = phone::any_connected();
+        let mut c = config::load(&app);
+        let was_on = c.dual_screen.contains(&emu.id);
+        if on || was_on {
+            match dualscreen::prepare(&emu.id, std::path::Path::new(exe), on) {
+                Ok(_) => {
+                    c.dual_screen.retain(|e| e != &emu.id);
+                    if on {
+                        c.dual_screen.push(emu.id.clone());
+                    }
+                    let _ = config::save(&app, &c);
+                    dual = on;
+                }
+                Err(e) => shell::log(&app, &format!("second écran : {e}")),
+            }
+        }
+    }
+
     let started = std::time::SystemTime::now();
     let mut child = emulators::command(emu, exe, &rom.platform_slug, &target, fullscreen || cfg.fullscreen, save_dirs.first().map(PathBuf::as_path))
         .and_then(|mut c| {
@@ -351,6 +373,10 @@ async fn launch(app: AppHandle, rom_id: u64, fullscreen: bool) -> Result<LaunchR
         .map_err(|e| fail("launch-failed", e))?;
     gamepad::set_running(child.id());
     launch_state(&app, rom_id, json!({ "status": "running" }));
+    if dual && let Some(pid) = child.id() {
+        shell::log(&app, "second écran : envoi vers le téléphone");
+        dualscreen::start(&emu.id, pid);
+    }
     // The Android controller switches to this console's layout.
     phone::game_started(&rom, client.cover(&rom).await);
 
@@ -358,6 +384,9 @@ async fn launch(app: AppHandle, rom_id: u64, fullscreen: bool) -> Result<LaunchR
     tauri::async_runtime::spawn(async move {
         let code = child.wait().await.ok().and_then(|s| s.code());
         gamepad::set_running(None);
+        if dual {
+            dualscreen::stop();
+        }
         phone::game_ended();
         // Back to the library, ready for the next pick with the controller.
         if let Some(win) = app2.get_webview_window("main") {

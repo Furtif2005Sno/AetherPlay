@@ -30,6 +30,10 @@ struct Shared {
     /// Last "game" / "idle" message, sent to phones as they connect.
     current: Mutex<String>,
     events: broadcast::Sender<String>,
+    /// Second-screen images (JPEG), see dualscreen.rs.
+    frames: broadcast::Sender<std::sync::Arc<Vec<u8>>>,
+    /// Current "screen" message, sent to phones as they connect.
+    screen: Mutex<Option<String>>,
     /// Connected phones (RetroTogether: one player each).
     phones: Mutex<Vec<Phone>>,
 }
@@ -63,6 +67,8 @@ static SHARED: LazyLock<Shared> = LazyLock::new(|| Shared {
     pin: format!("{:06}", random_u64() % 1_000_000),
     current: Mutex::new(json!({ "t": "idle" }).to_string()),
     events: broadcast::channel(16).0,
+    frames: broadcast::channel(4).0,
+    screen: Mutex::new(None),
     phones: Mutex::new(Vec::new()),
 });
 
@@ -107,6 +113,27 @@ pub fn game_started(rom: &Rom, cover: Option<Vec<u8>>) {
         })
         .to_string(),
     );
+}
+
+/// The game's second screen is streamed (`Some(width, height)`) or not.
+pub fn screen(size: Option<(i32, i32)>) {
+    let msg = match size {
+        Some((w, h)) => json!({ "t": "screen", "on": true, "w": w, "h": h }),
+        None => json!({ "t": "screen", "on": false }),
+    }
+    .to_string();
+    *SHARED.screen.lock().expect("screen") = size.map(|_| msg.clone());
+    let _ = SHARED.events.send(msg);
+}
+
+/// One image of the second screen, for every connected phone.
+pub fn frame(jpeg: Vec<u8>) {
+    let _ = SHARED.frames.send(std::sync::Arc::new(jpeg));
+}
+
+/// Whether a phone is connected (the second screen needs one).
+pub fn any_connected() -> bool {
+    !SHARED.phones.lock().expect("phones").is_empty()
 }
 
 /// Back to the menus.
@@ -194,8 +221,13 @@ async fn serve(app: &AppHandle, stream: TcpStream) -> Result<(), String> {
     tx.send(send(json!({ "t": "player", "n": me.player }))).await.map_err(|e| e.to_string())?;
 
     let mut events = SHARED.events.subscribe();
+    let mut frames = SHARED.frames.subscribe();
     let current = SHARED.current.lock().expect("current").clone();
+    let screen_state = SHARED.screen.lock().expect("screen").clone();
     tx.send(Message::text(current)).await.map_err(|e| e.to_string())?;
+    if let Some(screen) = screen_state {
+        tx.send(Message::text(screen)).await.map_err(|e| e.to_string())?;
+    }
     let mut virtual_pad = virtual_pad::VirtualPad::new();
     tx.send(send(json!({ "t": "virtual", "ok": virtual_pad.is_ok() }))).await.map_err(|e| e.to_string())?;
     if let Err(e) = &virtual_pad {
@@ -236,12 +268,23 @@ async fn serve(app: &AppHandle, stream: TcpStream) -> Result<(), String> {
                             }
                         }
                         Some("quit") => gamepad::quit_game(),
+                        Some("touch") => crate::dualscreen::touch(
+                            msg["x"].as_f64().unwrap_or(0.0) as f32,
+                            msg["y"].as_f64().unwrap_or(0.0) as f32,
+                            msg["down"].as_bool().unwrap_or(false),
+                        ),
                         _ => {}
                     }
                 }
                 event = events.recv() => {
                     if let Ok(event) = event {
                         tx.send(Message::text(event)).await.map_err(|e| e.to_string())?;
+                    }
+                }
+                // Images skipped when the phone lags behind (Lagged): only the latest matters.
+                frame = frames.recv() => {
+                    if let Ok(jpeg) = frame {
+                        tx.send(Message::binary(jpeg.to_vec())).await.map_err(|e| e.to_string())?;
                     }
                 }
             }

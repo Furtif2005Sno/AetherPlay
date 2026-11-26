@@ -57,6 +57,7 @@ L'app Android (`android/`, protocole dans `android/PROTOCOL.md`) fait du télép
 - **Bluetooth** : le téléphone devient une vraie manette sans fil, pour Windows, Mac ou SteamOS. Première fois : dans l'app, « Rendre le téléphone visible », puis sur l'ordinateur, réglages Bluetooth > Ajouter un appareil > « AetherPlay Manette ».
 - **Wi-Fi** : l'app trouve AetherPlay sur le réseau. Tape une seule fois le code affiché dans Réglages > AetherPlay > Manette Android. La manette change d'aspect selon la console du jeu lancé (SNES, N64, PlayStation, Switch…) et affiche la jaquette. Le Wi-Fi pilote aussi les menus et sert de secours sans Bluetooth (manette virtuelle sous SteamOS, ou Windows avec [ViGEmBus](https://github.com/nefarius/ViGEmBus)).
 - **Personnaliser** (icône réglages de la manette) : glisser les boutons, les agrandir ou les réduire, réglages gardés par console.
+- **Deuxième écran** (Windows) : pour la DS (melonDS) et le GamePad Wii U (Cemu), l'écran tactile s'affiche sur le téléphone au milieu des boutons, et on touche directement dessus. Il suffit que le téléphone soit connecté au lancement du jeu.
 - **RetroTogether** : chaque téléphone connecté est un joueur (J1, J2…). AetherPlay attribue les manettes aux joueurs dans l'ordre, pour RetroArch, Eden, Eglantine, PCSX2, DuckStation et Dolphin (GameCube). Cemu, RPCS3, melonDS et Azahar se règlent pour l'instant dans l'émulateur.
 
 ## SteamOS : installation

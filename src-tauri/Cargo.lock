@@ -21,7 +21,7 @@ dependencies = [
 
 [[package]]
 name = "aetherplay"
-version = "0.2.2"
+version = "0.3.0"
 dependencies = [
  "base64 0.23.1",
  "chrono",
@@ -30,6 +30,7 @@ dependencies = [
  "gethostname",
  "getrandom 0.3.4",
  "gilrs",
+ "jpeg-encoder",
  "keyring",
  "libloading 0.8.9",
  "mdns-sd",
@@ -45,6 +46,7 @@ dependencies = [
  "tokio",
  "tokio-tungstenite",
  "vigem-client",
+ "windows",
  "zip",
 ]
 
@@ -2290,6 +2292,12 @@ dependencies = [
  "quote",
  "syn 2.0.119",
 ]
+
+[[package]]
+name = "jpeg-encoder"
+version = "0.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b454d911ac55068f53495488d8ccd0646eaa540c033a28ee15b07838afafb01f"
 
 [[package]]
 name = "js-sys"

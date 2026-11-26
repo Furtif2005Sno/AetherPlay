@@ -34,11 +34,22 @@ Les navigateurs, donc l'interface RomM, lisent ce rapport tel quel. Pour les ém
 | PC → téléphone | `{"t":"idle"}` | retour aux menus |
 | téléphone → PC | `{"t":"pad","b":<bits>,"a":[lx,ly,rx,ry],"bt":true}` | état de la manette, envoyé à chaque changement |
 | téléphone → PC | `{"t":"quit"}` | fermer le jeu |
+| PC → téléphone | `{"t":"screen","on":true,"w":256,"h":192}` / `{"t":"screen","on":false}` | deuxième écran diffusé (Windows) |
+| PC → téléphone | message **binaire** : image JPEG | une image du deuxième écran (~30 par seconde) |
+| téléphone → PC | `{"t":"touch","x":0.5,"y":0.5,"down":true}` | toucher sur le deuxième écran (0..1), relayé en clic dans la fenêtre de l'émulateur |
 
 L'état reçu en Wi-Fi pilote toujours les menus d'AetherPlay. Il pilote aussi les jeux quand `bt` vaut `false`, via une manette Xbox 360 virtuelle :
 - Linux : uinput ;
 - Windows : pilote ViGEmBus ;
 - macOS : impossible, il faut le Bluetooth.
+
+## Deuxième écran (Windows)
+
+Quand un téléphone est connecté au lancement d'un jeu, AetherPlay ouvre le deuxième écran dans une fenêtre à part :
+- melonDS (DS) : `Instance0.Window1` réglée sur « écran du bas seulement », la fenêtre principale gardant celui du haut ;
+- Cemu (Wii U) : fenêtre « GamePad View ».
+
+Il la capture avec PrintWindow (même cachée derrière d'autres fenêtres, mais pas réduite), la recadre sur l'écran émulé et l'envoie aux téléphones. Les touchers reviennent en messages souris postés à cette fenêtre : le curseur et le focus ne bougent pas. Sans téléphone, la disposition d'origine est remise.
 
 ## RetroTogether
 

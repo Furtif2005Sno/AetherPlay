@@ -40,6 +40,12 @@ class Link {
     /** False when AetherPlay cannot create a virtual controller (macOS, or no driver on Windows). */
     private val _wifiInput = MutableStateFlow(true)
     val wifiInput: StateFlow<Boolean> = _wifiInput
+    /** Second screen streamed by AetherPlay (DS bottom screen, Wii U GamePad): its size, or null. */
+    private val _screen = MutableStateFlow<Pair<Int, Int>?>(null)
+    val screen: StateFlow<Pair<Int, Int>?> = _screen
+    /** Latest image of that screen. */
+    private val _frame = MutableStateFlow<Bitmap?>(null)
+    val frame: StateFlow<Bitmap?> = _frame
     /** RetroTogether: this phone's player number (1, 2, 3…), 0 until known. */
     private val _player = MutableStateFlow(0)
     val player: StateFlow<Int> = _player
@@ -72,6 +78,12 @@ class Link {
 
             override fun onMessage(webSocket: WebSocket, text: String) = handle(JSONObject(text))
 
+            override fun onMessage(webSocket: WebSocket, bytes: okio.ByteString) {
+                if (_screen.value == null) return
+                val data = bytes.toByteArray()
+                BitmapFactory.decodeByteArray(data, 0, data.size)?.let { _frame.value = it }
+            }
+
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                 if (webSocket == socket) _status.value = Status.Failed("AetherPlay injoignable (${t.message ?: "erreur réseau"})")
             }
@@ -102,6 +114,12 @@ class Link {
             "idle" -> _game.value = null
             "virtual" -> _wifiInput.value = msg.optBoolean("ok", false)
             "player" -> _player.value = msg.optInt("n", 0)
+            "screen" -> if (msg.optBoolean("on")) {
+                _screen.value = msg.optInt("w", 256) to msg.optInt("h", 192)
+            } else {
+                _screen.value = null
+                _frame.value = null
+            }
         }
     }
 
@@ -119,6 +137,12 @@ class Link {
         socket?.send(msg.toString())
     }
 
+    /** A touch on the second screen, [x] / [y] in 0..1 over its image. */
+    fun sendTouch(x: Float, y: Float, down: Boolean) {
+        val msg = JSONObject().put("t", "touch").put("x", x.toDouble()).put("y", y.toDouble()).put("down", down)
+        socket?.send(msg.toString())
+    }
+
     /** Asks AetherPlay to close the running game. */
     fun quitGame() {
         socket?.send(JSONObject().put("t", "quit").toString())
@@ -128,6 +152,8 @@ class Link {
         socket?.close(1000, null)
         socket = null
         _game.value = null
+        _screen.value = null
+        _frame.value = null
         _player.value = 0
         _status.value = Status.Disconnected
     }

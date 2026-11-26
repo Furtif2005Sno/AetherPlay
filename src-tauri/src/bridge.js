@@ -69,7 +69,7 @@
       : "linux";
 
   window.rommNative = {
-    shellVersion: "AetherPlay 0.2.2",
+    shellVersion: "AetherPlay 0.3.0",
     os,
     capabilities: ["launch-stage", "platform-support-all", "save-sync", "multi-disc", "launch-fullscreen"],
     launch: (request) => tauri().core.invoke("native_launch", { request }),

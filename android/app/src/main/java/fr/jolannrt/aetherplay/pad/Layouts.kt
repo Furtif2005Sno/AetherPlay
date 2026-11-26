@@ -34,7 +34,12 @@ data class PadLayout(
     val controls: List<Control>,
     /** Controller silhouette drawn behind the buttons. */
     val body: Body = Body(BodyShape.NONE, 0),
+    /** Where the game's second screen is shown, when AetherPlay streams one. */
+    val screen: ScreenArea? = null,
 )
+
+/** Rectangle for the second screen (fractions of the phone screen). */
+data class ScreenArea(val x0: Float, val y0: Float, val x1: Float, val y1: Float)
 
 enum class BodyShape { NONE, DOGBONE, BRICK, TRIDENT, HANDLES, JOYCONS, HANDHELD, PANEL }
 
@@ -140,7 +145,29 @@ val MENU = PadLayout(
     listOf(DPAD, Control.Stick(2, 0.68f, 0.78f, 0.12f)) + face(XBOX) + shoulders("LB", "RB") + center("◧", "≡"),
 )
 
-fun layoutFor(platform: String?): PadLayout = when (platform) {
+/**
+ * Layout for [platform]; with [screen], room in the middle for the game's
+ * second screen (DS / 3DS bottom screen, Wii U GamePad).
+ */
+fun layoutFor(platform: String?, screen: Boolean = false): PadLayout {
+    val base = baseLayout(platform)
+    if (!screen) return base
+    return when (platform) {
+        "nds", "3ds", "n3ds" -> base.copy(screen = ScreenArea(0.27f, 0.12f, 0.72f, 0.84f))
+        "wiiu" -> base.copy(
+            controls = listOf(
+                Control.Stick(0, 0.1f, 0.36f, 0.13f),
+                Control.Dpad(0.1f, 0.76f, 0.12f),
+                Control.Stick(2, 0.9f, 0.78f, 0.11f),
+            ) + face(NINTENDO, x = 0.88f, y = 0.36f, gap = 0.065f, r = 0.065f) +
+                shoulders("L", "R", "ZL", "ZR") + center("−", "+", "⌂"),
+            screen = ScreenArea(0.2f, 0.14f, 0.77f, 0.84f),
+        )
+        else -> base
+    }
+}
+
+private fun baseLayout(platform: String?): PadLayout = when (platform) {
     null, "" -> MENU
     "nes", "famicom" -> twoButtons("NES", 0xFF26262B, 0xFFD13B3B, "B", "A", 0xFFC83737,
         body = Body(BodyShape.BRICK, 0xFFBDBDC2, 0xFF1E1E21, 0xFFC83737))

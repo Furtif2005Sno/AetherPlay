@@ -27,6 +27,9 @@ pub struct Config {
     /// Paired Android controllers: token -> phone name.
     #[serde(default)]
     pub phones: HashMap<String, String>,
+    /// Emulators whose second-screen window AetherPlay turned on (to undo it).
+    #[serde(default)]
+    pub dual_screen: Vec<String>,
 }
 
 fn default_true() -> bool {
@@ -44,6 +47,7 @@ impl Default for Config {
             fullscreen: false,
             quit_combo: true,
             phones: HashMap::new(),
+            dual_screen: Vec::new(),
         }
     }
 }

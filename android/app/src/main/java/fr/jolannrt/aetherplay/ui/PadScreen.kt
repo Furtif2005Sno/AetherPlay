@@ -59,6 +59,12 @@ import fr.jolannrt.aetherplay.pad.Btn
 import fr.jolannrt.aetherplay.pad.Control
 import fr.jolannrt.aetherplay.pad.PadLayout
 import fr.jolannrt.aetherplay.pad.PadState
+import fr.jolannrt.aetherplay.pad.ScreenArea
+import android.graphics.Bitmap
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.graphics.FilterQuality
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntSize
 import fr.jolannrt.aetherplay.pad.Tweak
 import fr.jolannrt.aetherplay.pad.tweaked
 import kotlin.math.hypot
@@ -84,6 +90,9 @@ fun PadScreen(
     onTweaks: (Map<Int, Tweak>) -> Unit = {},
     backdrop: Backdrop = Backdrop.CONTROLLER,
     onBackdrop: (Backdrop) -> Unit = {},
+    frame: Bitmap? = null,
+    screenSize: Pair<Int, Int>? = null,
+    onTouch: (Float, Float, Boolean) -> Unit = { _, _, _ -> },
 ) {
     val accent = Color(layout.accent)
     var editing by remember { mutableStateOf(false) }
@@ -107,7 +116,7 @@ fun PadScreen(
         if (editing) {
             EditPad(layout, tweaks, selected, { selected = it }, onTweaks)
         } else {
-            Pad(layout.tweaked(tweaks), onState)
+            Pad(layout.tweaked(tweaks), onState, frame, screenSize, onTouch)
         }
         Row(
             Modifier
@@ -282,8 +291,16 @@ private fun controlAt(layout: PadLayout, p: Offset, w: Float, h: Float): Int? =
 
 /** Draws the controls and turns every finger on the screen into a controller state. */
 @Composable
-private fun Pad(layout: PadLayout, onState: (PadState) -> Unit) {
+private fun Pad(
+    layout: PadLayout,
+    onState: (PadState) -> Unit,
+    frame: Bitmap? = null,
+    screenSize: Pair<Int, Int>? = null,
+    onTouch: (Float, Float, Boolean) -> Unit = { _, _, _ -> },
+) {
     val view = LocalView.current
+    val liveSize by rememberUpdatedState(screenSize)
+    val touch by rememberUpdatedState(onTouch)
     var pressed by remember(layout) { mutableStateOf(0) }
     val sticks = remember(layout) { mutableStateMapOf<Int, Offset>() }
     var axisButtons by remember(layout) { mutableStateOf(emptySet<Control.Button>()) }
@@ -297,10 +314,24 @@ private fun Pad(layout: PadLayout, onState: (PadState) -> Unit) {
                 .fillMaxSize()
                 .pointerInput(layout, w, h) {
                     val owners = HashMap<PointerId, Control.Stick>()
+                    var stylus: PointerId? = null
                     awaitPointerEventScope {
                         while (true) {
                             val event = awaitPointerEvent()
                             event.changes.forEach { it.consume() }
+                            // Second screen: the finger that lands on it is the stylus.
+                            val image = layout.screen?.let { area -> liveSize?.let { screenRect(area, it, w, h) } }
+                            for (c in event.changes) {
+                                if (image != null && c.pressed && !c.previousPressed && stylus == null && image.contains(c.position)) {
+                                    stylus = c.id
+                                }
+                                if (c.id == stylus && image != null) {
+                                    val x = ((c.position.x - image.left) / image.width).coerceIn(0f, 1f)
+                                    val y = ((c.position.y - image.top) / image.height).coerceIn(0f, 1f)
+                                    touch(x, y, c.pressed)
+                                    if (!c.pressed) stylus = null
+                                }
+                            }
                             for (c in event.changes) {
                                 if (c.pressed && !c.previousPressed) {
                                     stickAt(layout, c.position, w, h)?.let { owners[c.id] = it }
@@ -313,7 +344,7 @@ private fun Pad(layout: PadLayout, onState: (PadState) -> Unit) {
                             val stickPos = HashMap<Int, Offset>()
                             val axisHits = HashSet<Control.Button>()
                             for (c in event.changes) {
-                                if (!c.pressed) continue
+                                if (!c.pressed || c.id == stylus) continue
                                 val stick = owners[c.id]
                                 if (stick != null) {
                                     val center = Offset(stick.x * w, stick.y * h)
@@ -349,6 +380,19 @@ private fun Pad(layout: PadLayout, onState: (PadState) -> Unit) {
                     }
                 },
         ) {
+            val area = layout.screen
+            if (area != null && screenSize != null) {
+                val r = screenRect(area, screenSize, size.width, size.height)
+                drawRoundRect(Color.Black, r.topLeft - Offset(8f, 8f), Size(r.width + 16f, r.height + 16f), CornerRadius(14f))
+                if (frame != null) {
+                    drawImage(
+                        frame.asImageBitmap(),
+                        dstOffset = IntOffset(r.left.toInt(), r.top.toInt()),
+                        dstSize = IntSize(r.width.toInt(), r.height.toInt()),
+                        filterQuality = FilterQuality.None,
+                    )
+                }
+            }
             for (ctl in layout.controls) {
                 when (ctl) {
                     is Control.Button -> drawButton(ctl, pressed, ctl in axisButtons, layout.accent)
@@ -358,6 +402,18 @@ private fun Pad(layout: PadLayout, onState: (PadState) -> Unit) {
             }
         }
     }
+}
+
+/** The second screen's image: [size] fitted in [area], centered. */
+private fun screenRect(area: ScreenArea, size: Pair<Int, Int>, w: Float, h: Float): Rect {
+    val aw = (area.x1 - area.x0) * w
+    val ah = (area.y1 - area.y0) * h
+    val scale = min(aw / size.first, ah / size.second)
+    val iw = size.first * scale
+    val ih = size.second * scale
+    val left = area.x0 * w + (aw - iw) / 2
+    val top = area.y0 * h + (ah - ih) / 2
+    return Rect(left, top, left + iw, top + ih)
 }
 
 private fun stickAt(layout: PadLayout, p: Offset, w: Float, h: Float): Control.Stick? =
@@ -428,8 +484,9 @@ private fun DrawScope.drawDpad(d: Control.Dpad, pressed: Int, accent: Long) {
     val c = Offset(d.x * size.width, d.y * h)
     val r = d.r * h
     val arm = r * 0.36f
-    val base = Color(0xFF2C2C36)
-    drawCircle(Color.Black.copy(alpha = 0.25f), r * 1.12f, c)
+    val base = Color(0xFF16161B)
+    drawCircle(Color.Black.copy(alpha = 0.18f), r * 1.12f, c)
+    drawCircle(Color.White.copy(alpha = 0.08f), r * 1.12f, c, style = Stroke(2f))
     drawRoundRect(base, Offset(c.x - arm, c.y - r), Size(arm * 2, r * 2), CornerRadius(arm * 0.4f))
     drawRoundRect(base, Offset(c.x - r, c.y - arm), Size(r * 2, arm * 2), CornerRadius(arm * 0.4f))
     val hl = Color(accent).copy(alpha = 0.85f)
