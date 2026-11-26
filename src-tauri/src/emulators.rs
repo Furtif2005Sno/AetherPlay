@@ -19,6 +19,45 @@ pub struct Emulator {
     /// RetroArch only: platform slug -> libretro core name.
     #[serde(default)]
     pub cores: HashMap<String, String>,
+    /// OS -> save directories, with `{exe_dir}`, `{rom_dir}`, `{home}`,
+    /// `{documents}` and `{appdata}` placeholders. No entry = no save sync.
+    #[serde(default)]
+    pub saves: HashMap<String, Vec<String>>,
+}
+
+/// Values substituted into `saves` paths.
+pub struct PathVars {
+    pub home: PathBuf,
+    pub documents: PathBuf,
+    pub appdata: PathBuf,
+}
+
+impl Emulator {
+    /// Resolved save directories for this emulator on the current OS.
+    pub fn save_dirs(&self, exe_path: &str, rom: &Path, vars: &PathVars) -> Vec<PathBuf> {
+        let exe = executable(exe_path).unwrap_or_else(|_| PathBuf::from(exe_path));
+        let exe_dir = exe.parent().unwrap_or(Path::new("."));
+        let rom_dir = rom.parent().unwrap_or(Path::new("."));
+        let s = |p: &Path| p.to_string_lossy().into_owned();
+        self.saves
+            .get(CURRENT_OS)
+            .into_iter()
+            .flatten()
+            .map(|t| {
+                PathBuf::from(
+                    t.replace("{exe_dir}", &s(exe_dir))
+                        .replace("{rom_dir}", &s(rom_dir))
+                        .replace("{home}", &s(&vars.home))
+                        .replace("{documents}", &s(&vars.documents))
+                        .replace("{appdata}", &s(&vars.appdata)),
+                )
+            })
+            .collect()
+    }
+
+    pub fn core(&self, platform: &str) -> Option<&str> {
+        self.cores.get(platform).map(String::as_str)
+    }
 }
 
 pub const CURRENT_OS: &str = if cfg!(target_os = "macos") { "macos" } else { "windows" };

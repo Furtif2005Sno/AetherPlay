@@ -1,6 +1,7 @@
 mod config;
 mod emulators;
 mod romm;
+mod saves;
 
 use serde::Serialize;
 use std::{collections::HashMap, path::PathBuf};
@@ -114,15 +115,57 @@ async fn play(app: AppHandle, rom_id: u64) -> Result<(), String> {
             .await?;
     }
 
+    let save_dirs = emu.save_dirs(exe, &dest, &path_vars(&app)?);
+    let mut index = saves::Index::load(app.path().app_local_data_dir().map_err(|e| e.to_string())?.join("saves-index.json"));
+    if !save_dirs.is_empty() {
+        sync_event(&app, rom_id, "restoring", None);
+        match saves::restore(&client, &rom, &emu.id, &save_dirs, &mut index).await {
+            Ok(()) => sync_event(&app, rom_id, "restored", None),
+            // A failed restore must not block playing; the user is told.
+            Err(e) => sync_event(&app, rom_id, "error", Some(format!("Restauration de la sauvegarde : {e}"))),
+        }
+    }
+
+    let started = std::time::SystemTime::now();
     let mut child = emulators::command(emu, exe, &rom.platform_slug, &dest)?
         .spawn()
         .map_err(|e| format!("Impossible de lancer {} : {e}", emu.name))?;
     tauri::async_runtime::spawn(async move {
         let code = child.wait().await.ok().and_then(|s| s.code());
-        // TODO: save sync (upload to RomM) goes here.
         let _ = app.emit("game-exited", Exited { rom_id, code });
+        if save_dirs.is_empty() {
+            return;
+        }
+        sync_event(&app, rom_id, "uploading", None);
+        let core = emu.core(&rom.platform_slug);
+        match saves::upload(&client, &rom, &emu.id, core, &save_dirs, &dest, started, &mut index).await {
+            Ok(true) => sync_event(&app, rom_id, "uploaded", None),
+            Ok(false) => sync_event(&app, rom_id, "unchanged", None),
+            Err(e) => sync_event(&app, rom_id, "error", Some(format!("Envoi de la sauvegarde : {e}"))),
+        }
     });
     Ok(())
+}
+
+fn path_vars(app: &AppHandle) -> Result<emulators::PathVars, String> {
+    let p = app.path();
+    let e = |e: tauri::Error| e.to_string();
+    Ok(emulators::PathVars {
+        home: p.home_dir().map_err(e)?,
+        documents: p.document_dir().map_err(e)?,
+        appdata: p.data_dir().map_err(e)?,
+    })
+}
+
+#[derive(Serialize, Clone)]
+struct SyncStatus {
+    rom_id: u64,
+    state: &'static str,
+    message: Option<String>,
+}
+
+fn sync_event(app: &AppHandle, rom_id: u64, state: &'static str, message: Option<String>) {
+    let _ = app.emit("save-sync", SyncStatus { rom_id, state, message });
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]

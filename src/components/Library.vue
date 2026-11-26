@@ -11,6 +11,14 @@ const error = ref("");
 const loading = ref(false);
 // rom id -> download percentage, or "running"
 const status = ref<Record<number, number | "running">>({});
+const notice = ref("");
+const SYNC_LABELS: Record<string, string> = {
+  restoring: "Récupération de la sauvegarde…",
+  restored: "Sauvegarde à jour",
+  uploading: "Envoi de la sauvegarde…",
+  uploaded: "Sauvegarde envoyée sur RomM",
+  unchanged: "Aucune nouvelle sauvegarde",
+};
 
 const filtered = computed(() => {
   const q = search.value.toLowerCase();
@@ -50,6 +58,13 @@ onMounted(async () => {
       status.value[payload.rom_id] = payload.total ? Math.round((payload.done / payload.total) * 100) : 0;
     }),
     await listen<{ rom_id: number }>("game-exited", ({ payload }) => delete status.value[payload.rom_id]),
+    await listen<{ rom_id: number; state: string; message?: string }>("save-sync", ({ payload }) => {
+      if (payload.state === "error") error.value = payload.message ?? "Erreur de synchronisation";
+      notice.value = SYNC_LABELS[payload.state] ?? "";
+      if (["uploaded", "unchanged", "restored", "error"].includes(payload.state)) {
+        setTimeout(() => (notice.value = ""), 4000);
+      }
+    }),
   );
   try {
     platforms.value = (await api.platforms()).filter((p) => p.rom_count > 0);
@@ -84,6 +99,7 @@ const label = (s: number | "running" | undefined) =>
         <input v-model="search" class="input search" placeholder="Rechercher…" />
       </header>
       <p v-if="error" class="error">{{ error }}</p>
+      <div v-if="notice" class="toast panel">{{ notice }}</div>
       <p v-if="loading" class="muted">Chargement…</p>
       <div class="grid">
         <div v-for="rom in filtered" :key="rom.id" class="card">
@@ -130,4 +146,5 @@ h2 { font-size: 22px; }
 .card:hover .play, .play.busy { opacity: 1; }
 .title { margin-top: 8px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .size { font-size: 11.5px; }
+.toast { position: fixed; right: 20px; bottom: 20px; padding: 12px 18px; z-index: 10; }
 </style>

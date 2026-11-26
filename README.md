@@ -27,7 +27,7 @@ npm run tauri build    # générer l'installeur
 - [x] Téléchargement avec progression + cache local
 - [x] Lancement de l'émulateur configuré (RetroArch avec cores par plateforme)
 - [ ] ROMs multi-fichiers (zip à extraire)
-- [ ] Synchronisation des sauvegardes avec RomM (`/api/saves`)
+- [x] Synchronisation des sauvegardes avec RomM (restauration avant la partie, envoi après) : dossiers par émulateur dans `catalog.json`, à vérifier sur chaque émulateur
 - [ ] Installation automatique des émulateurs (assistant au premier lancement)
 - [ ] Choix de l'émulateur par plateforme
 - [ ] CI de build Windows + macOS

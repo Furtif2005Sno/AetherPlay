@@ -51,6 +51,32 @@ enum RomList {
     List(Vec<Rom>),
 }
 
+#[derive(Deserialize, Clone)]
+pub struct Save {
+    pub id: u64,
+    pub file_name: String,
+    #[serde(default)]
+    pub emulator: Option<String>,
+    #[serde(default)]
+    pub slot: Option<String>,
+    pub updated_at: chrono::DateTime<chrono::Utc>,
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum SaveList {
+    Page { items: Vec<Save> },
+    List(Vec<Save>),
+}
+
+pub struct SaveUpload<'a> {
+    pub rom_id: u64,
+    pub emulator: &'a str,
+    pub core: Option<&'a str>,
+    pub slot: &'a str,
+    pub file_name: &'a str,
+}
+
 fn err(e: impl std::fmt::Display) -> String {
     e.to_string()
 }
@@ -142,6 +168,40 @@ impl Client {
         file.flush().await.map_err(err)?;
         drop(file);
         tokio::fs::rename(&tmp, dest).await.map_err(err)
+    }
+
+    pub async fn saves(&self, rom_id: u64) -> Result<Vec<Save>, String> {
+        let mut url = self.url(&["api", "saves"]);
+        url.query_pairs_mut().append_pair("rom_id", &rom_id.to_string());
+        Ok(match self.json(url).await? {
+            SaveList::Page { items } => items,
+            SaveList::List(v) => v,
+        })
+    }
+
+    pub async fn save_content(&self, id: u64) -> Result<Vec<u8>, String> {
+        let url = self.url(&["api", "saves", &id.to_string(), "content"]);
+        Ok(self.send(self.get(url)).await?.bytes().await.map_err(err)?.to_vec())
+    }
+
+    pub async fn upload_save(&self, up: SaveUpload<'_>, data: Vec<u8>) -> Result<(), String> {
+        let mut url = self.url(&["api", "saves"]);
+        {
+            let mut q = url.query_pairs_mut();
+            q.append_pair("rom_id", &up.rom_id.to_string())
+                .append_pair("emulator", up.emulator)
+                .append_pair("slot", up.slot)
+                .append_pair("overwrite", "true")
+                .append_pair("autocleanup", "true")
+                .append_pair("autocleanup_limit", "10");
+            if let Some(core) = up.core {
+                q.append_pair("core", core);
+            }
+        }
+        let part = reqwest::multipart::Part::bytes(data).file_name(up.file_name.to_string());
+        let form = reqwest::multipart::Form::new().part("saveFile", part);
+        let req = self.http.post(url).basic_auth(&self.user, Some(&self.pass)).multipart(form);
+        self.send(req).await.map(|_| ())
     }
 
     /// Fetches a RomM resource (cover art…) as (content-type, bytes).
