@@ -1,6 +1,7 @@
 mod cache;
 mod config;
 mod emulators;
+mod gamepad;
 mod install;
 mod romm;
 mod roms;
@@ -29,6 +30,8 @@ struct Settings {
     emulator_paths: HashMap<String, String>,
     platform_emulators: HashMap<String, String>,
     save_dirs: HashMap<String, String>,
+    fullscreen: bool,
+    quit_combo: bool,
 }
 
 #[tauri::command]
@@ -41,6 +44,8 @@ fn get_settings(app: AppHandle) -> Settings {
         emulator_paths: cfg.emulator_paths,
         platform_emulators: cfg.platform_emulators,
         save_dirs: cfg.save_dirs,
+        fullscreen: cfg.fullscreen,
+        quit_combo: cfg.quit_combo,
     }
 }
 
@@ -193,7 +198,7 @@ struct LaunchResult {
 
 /// Downloads the ROM if needed, restores its save, then starts the matching
 /// emulator; uploads the save once it exits. Progress goes out as `launch-state`.
-async fn launch(app: AppHandle, rom_id: u64) -> Result<LaunchResult, LaunchError> {
+async fn launch(app: AppHandle, rom_id: u64, fullscreen: bool) -> Result<LaunchResult, LaunchError> {
     let fail = |code: &'static str, message: String| {
         launch_state(&app, rom_id, json!({ "status": "failed", "error": { "code": code, "message": message } }));
         LaunchError { code, message }
@@ -266,14 +271,20 @@ async fn launch(app: AppHandle, rom_id: u64) -> Result<LaunchResult, LaunchError
     }
 
     let started = std::time::SystemTime::now();
-    let mut child = emulators::command(emu, exe, &rom.platform_slug, &target)
+    let mut child = emulators::command(emu, exe, &rom.platform_slug, &target, fullscreen || cfg.fullscreen)
         .and_then(|mut c| c.spawn().map_err(|e| format!("Impossible de lancer {} : {e}", emu.name)))
         .map_err(|e| fail("launch-failed", e))?;
+    gamepad::set_running(child.id());
     launch_state(&app, rom_id, json!({ "status": "running" }));
 
     let app2 = app.clone();
     tauri::async_runtime::spawn(async move {
         let code = child.wait().await.ok().and_then(|s| s.code());
+        gamepad::set_running(None);
+        // Back to the library, ready for the next pick with the controller.
+        if let Some(win) = app2.get_webview_window("main") {
+            let _ = win.set_focus();
+        }
         launch_state(&app2, rom_id, json!({ "status": "exited", "exitCode": code }));
         if save_dirs.is_empty() {
             return;
@@ -296,7 +307,7 @@ async fn launch(app: AppHandle, rom_id: u64) -> Result<LaunchResult, LaunchError
 #[tauri::command]
 async fn native_launch(app: AppHandle, request: Value) -> Result<LaunchResult, LaunchError> {
     let rom_id = request["romId"].as_u64().ok_or(LaunchError { code: "invalid-request", message: "romId manquant".into() })?;
-    launch(app, rom_id).await
+    launch(app, rom_id, request["fullscreen"].as_bool().unwrap_or(false)).await
 }
 
 #[tauri::command]
@@ -334,6 +345,32 @@ fn open_romm(app: AppHandle) -> Result<(), String> {
     shell::open_romm(&app).map_err(|e| e.to_string())
 }
 
+/// Boolean app options shown on the AetherPlay settings page.
+#[tauri::command]
+fn set_option(app: AppHandle, name: String, value: bool) -> Result<(), String> {
+    let mut cfg = config::load(&app);
+    match name.as_str() {
+        "fullscreen" => cfg.fullscreen = value,
+        "quit_combo" => cfg.quit_combo = value,
+        _ => return Err(format!("Option inconnue : {name}")),
+    }
+    config::save(&app, &cfg)
+}
+
+/// Native file/folder picker for pages that cannot use the dialog plugin's JS API.
+#[tauri::command]
+async fn pick_path(app: AppHandle, directory: bool, title: String) -> Option<String> {
+    use tauri_plugin_dialog::DialogExt;
+    tauri::async_runtime::spawn_blocking(move || {
+        let dialog = app.dialog().file().set_title(title);
+        let picked = if directory { dialog.blocking_pick_folder() } else { dialog.blocking_pick_file() };
+        picked.map(|p| p.to_string())
+    })
+    .await
+    .ok()
+    .flatten()
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -346,6 +383,7 @@ pub fn run() {
         })
         .setup(|app| {
             shell::create_main_window(app.handle())?;
+            gamepad::spawn_watcher(app.handle().clone());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -365,7 +403,9 @@ pub fn run() {
             native_cancel,
             native_platform_support,
             open_settings,
-            open_romm
+            open_romm,
+            set_option,
+            pick_path
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

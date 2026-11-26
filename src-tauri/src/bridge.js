@@ -25,7 +25,7 @@
   window.rommNative = {
     shellVersion: "AetherPlay 0.1.0",
     os: navigator.userAgent.includes("Mac") ? "darwin" : "win32",
-    capabilities: ["launch-stage", "platform-support-all", "save-sync", "multi-disc"],
+    capabilities: ["launch-stage", "platform-support-all", "save-sync", "multi-disc", "launch-fullscreen"],
     launch: (request) => tauri().core.invoke("native_launch", { request }),
     cancel: (romId) => tauri().core.invoke("native_cancel", { romId }),
     getPlatformSupport: (query) =>

@@ -24,6 +24,7 @@ import { useI18n } from "vue-i18n";
 import { ROUTES } from "@/plugins/router";
 import storeAuth from "@/stores/auth";
 import storeHeartbeat from "@/stores/heartbeat";
+import { isAetherPlay } from "@/v2/aetherplay/api";
 import { useCan } from "@/v2/composables/useCan";
 import storeNotificationInbox from "@/v2/stores/notificationInbox";
 
@@ -47,13 +48,26 @@ interface Entry {
 }
 
 interface Group {
-  key: "account" | "library" | "system" | "tools";
+  key: "aetherplay" | "account" | "library" | "system" | "tools";
   label: string;
   entries: Entry[];
 }
 
 const groups = computed<Group[]>(() => {
   const all: Group[] = [
+    // AetherPlay: the desktop app's settings, first since they are its own.
+    {
+      key: "aetherplay",
+      label: "AetherPlay",
+      entries: [
+        {
+          icon: "mdi-gamepad-variant-outline",
+          label: "Émulateurs et options",
+          to: { name: ROUTES.AETHERPLAY },
+          visible: isAetherPlay(),
+        },
+      ],
+    },
     {
       key: "account",
       label: t("settings.group-account"),

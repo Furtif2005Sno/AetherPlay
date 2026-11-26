@@ -55,6 +55,7 @@ export const v2RouteComponents: Partial<Record<RouteName, V2Route>> = {
   [ROUTES.USER_PROFILE]: () => import("@/v2/views/Settings/UserProfile.vue"),
   [ROUTES.USER_INTERFACE]: () =>
     import("@/v2/views/Settings/UserInterface.vue"),
+  [ROUTES.AETHERPLAY]: () => import("@/v2/views/Settings/AetherPlay.vue"),
   [ROUTES.LIBRARY_MANAGEMENT]: () =>
     import("@/v2/views/Settings/LibraryManagement.vue"),
   [ROUTES.SCAN_SETTINGS]: () => import("@/v2/views/Settings/ScanSettings.vue"),

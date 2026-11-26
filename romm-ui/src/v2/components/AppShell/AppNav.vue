@@ -54,20 +54,17 @@ const scrolled = computed(
   >
     <nav class="r-v2-nav">
       <router-link to="/" class="r-v2-nav__logo" :aria-label="t('common.home')">
+        <!-- AetherPlay: app branding instead of the RomM logo. -->
         <RImg
-          src="/assets/isotipo.svg"
-          alt="RomM isotipo"
+          src="/aetherplay.png"
+          alt="AetherPlay"
           aria-hidden="true"
           class="r-v2-nav__logo-mark"
           :width="32"
         />
-        <RImg
-          src="/assets/logotipo.svg"
-          alt="RomM logotipo"
-          aria-hidden="true"
-          class="r-v2-nav__logo-word"
-          :width="70"
-        />
+        <span class="r-v2-nav__logo-word aetherplay-wordmark" aria-hidden="true">
+          Aether<span>Play</span>
+        </span>
       </router-link>
 
       <div class="r-v2-nav__center">
@@ -223,5 +220,15 @@ html[data-bp~="xs"] .r-v2-nav__logo-word {
 }
 html[data-bp~="xs"] .r-v2-nav__right {
   gap: var(--r-space-2);
+}
+.aetherplay-wordmark {
+  font-weight: 700;
+  font-size: 17px;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  color: var(--r-color-fg);
+}
+.aetherplay-wordmark span {
+  color: var(--r-color-brand-primary);
 }
 </style>

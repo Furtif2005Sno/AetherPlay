@@ -11,11 +11,12 @@ defineOptions({ inheritAttrs: false });
 <template>
   <RCard v-bind="$attrs" class="auth-card" variant="elevated" elevation="4">
     <div class="auth-card__inner">
+      <!-- AetherPlay: app branding instead of the RomM logo. -->
       <RImg
-        src="/assets/isotipo.svg"
+        src="/aetherplay.png"
         :width="80"
         class="auth-card__logo"
-        alt="RomM"
+        alt="AetherPlay"
       />
       <slot />
     </div>

@@ -14,6 +14,7 @@
 //
 // Items inherit the same scope/role gates as their target views so
 // unauthorised users don't see options they can't open.
+import { isAetherPlay } from "@/v2/aetherplay/api";
 import {
   RAvatar,
   RBadge,
@@ -182,6 +183,14 @@ async function onLogout() {
       <div class="r-v2-user-menu__group-label">
         {{ t("settings.group-account") }}
       </div>
+      <!-- AetherPlay: the desktop app's settings. -->
+      <RMenuItem
+        v-if="isAetherPlay()"
+        :to="{ name: ROUTES.AETHERPLAY }"
+        icon="mdi-gamepad-variant-outline"
+        label="AetherPlay"
+        @click="open = false"
+      />
       <RMenuItem
         v-if="canSeeProfile"
         :to="{ name: ROUTES.USER_PROFILE, params: { user: user?.id } }"

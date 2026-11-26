@@ -5,7 +5,7 @@ use tauri::{AppHandle, Manager};
 const KEYRING_SERVICE: &str = "aetherplay";
 
 /// Persisted settings (the password lives in the OS keychain, never in this file).
-#[derive(Default, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct Config {
     pub server_url: String,
     pub username: String,
@@ -18,6 +18,30 @@ pub struct Config {
     /// Emulator id -> save folder overriding the catalog default.
     #[serde(default)]
     pub save_dirs: HashMap<String, String>,
+    /// Start emulators fullscreen.
+    #[serde(default)]
+    pub fullscreen: bool,
+    /// Holding Select + Start on a controller quits the running game.
+    #[serde(default = "default_true")]
+    pub quit_combo: bool,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            server_url: String::new(),
+            username: String::new(),
+            emulator_paths: HashMap::new(),
+            platform_emulators: HashMap::new(),
+            save_dirs: HashMap::new(),
+            fullscreen: false,
+            quit_combo: true,
+        }
+    }
 }
 
 fn file(app: &AppHandle) -> Result<PathBuf, String> {

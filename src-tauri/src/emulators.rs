@@ -27,6 +27,9 @@ pub struct Emulator {
     /// to register folders holding Switch updates/DLC as external content.
     #[serde(default)]
     pub config_ini: HashMap<String, String>,
+    /// Arguments that start the emulator fullscreen.
+    #[serde(default)]
+    pub fullscreen_args: Vec<String>,
 }
 
 /// Values substituted into catalog paths.
@@ -186,6 +189,7 @@ pub fn command(
     path: &str,
     platform: &str,
     rom: &Path,
+    fullscreen: bool,
 ) -> Result<tokio::process::Command, String> {
     let exe = executable(path)?;
     let core = match emu.cores.get(platform) {
@@ -200,6 +204,9 @@ pub fn command(
     };
     let rom = rom.to_string_lossy();
     let mut cmd = tokio::process::Command::new(&exe);
+    if fullscreen {
+        cmd.args(&emu.fullscreen_args);
+    }
     cmd.args(emu.args.iter().map(|a| a.replace("{rom}", &rom).replace("{core}", &core)));
     if let Some(dir) = exe.parent() {
         cmd.current_dir(dir);

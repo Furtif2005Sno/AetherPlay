@@ -27,6 +27,7 @@ chrono = { version = "0.4.45", default-features = false, features = ["serde", "s
 regex = "1.13.2"
 sevenz-rust2 = "0.27.0"
 base64 = "0.23.1"
+gilrs = { version = "0.11.2", default-features = false, features = ["xinput"] }
 
 [profile.release]
 codegen-units = 1

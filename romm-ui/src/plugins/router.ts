@@ -379,6 +379,16 @@ const routes = [
               v2: v2For(ROUTES.USER_INTERFACE),
             },
           },
+          // AetherPlay: the desktop app's own settings page.
+          {
+            path: "aetherplay",
+            name: ROUTES.AETHERPLAY,
+            meta: { title: "AetherPlay", bare: true },
+            components: {
+              default: () => import("@/v2/views/Settings/AetherPlay.vue"),
+              v2: v2For(ROUTES.AETHERPLAY),
+            },
+          },
           {
             path: "library-management",
             name: ROUTES.LIBRARY_MANAGEMENT,

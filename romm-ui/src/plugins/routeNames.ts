@@ -25,6 +25,8 @@ export const ROUTES = {
   NOTIFICATIONS: "notifications",
   USER_PROFILE: "user-profile",
   USER_INTERFACE: "user-interface",
+  // AetherPlay: the desktop app's own settings page.
+  AETHERPLAY: "aetherplay",
   LIBRARY_MANAGEMENT: "library-management",
   SCAN_SETTINGS: "scan-settings",
   CONVERSION_SETTINGS: "conversion-settings",
