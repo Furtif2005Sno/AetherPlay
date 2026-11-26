@@ -171,10 +171,12 @@ fn rom_path(app: &AppHandle, rom: &romm::Rom) -> Result<PathBuf, String> {
 fn path_vars(app: &AppHandle) -> Result<emulators::PathVars, String> {
     let p = app.path();
     let e = |e: tauri::Error| e.to_string();
+    let home = p.home_dir().map_err(e)?;
     Ok(emulators::PathVars {
-        home: p.home_dir().map_err(e)?,
-        documents: p.document_dir().map_err(e)?,
+        documents: p.document_dir().unwrap_or_else(|_| home.join("Documents")),
         appdata: p.data_dir().map_err(e)?,
+        config: p.config_dir().map_err(e)?,
+        home,
     })
 }
 

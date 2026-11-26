@@ -37,6 +37,8 @@ pub struct PathVars {
     pub home: PathBuf,
     pub documents: PathBuf,
     pub appdata: PathBuf,
+    /// Roaming/config dir: %APPDATA%, ~/Library/Application Support, ~/.config.
+    pub config: PathBuf,
 }
 
 impl PathVars {
@@ -49,7 +51,8 @@ impl PathVars {
             .replace("{exe_dir}", &s(exe.parent().unwrap_or(Path::new("."))))
             .replace("{home}", &s(&self.home))
             .replace("{documents}", &s(&self.documents))
-            .replace("{appdata}", &s(&self.appdata));
+            .replace("{appdata}", &s(&self.appdata))
+            .replace("{config}", &s(&self.config));
         if let Some(rom) = rom {
             out = out.replace("{rom_dir}", &s(rom.parent().unwrap_or(Path::new("."))));
         }
@@ -87,7 +90,13 @@ impl Emulator {
     }
 }
 
-pub const CURRENT_OS: &str = if cfg!(target_os = "macos") { "macos" } else { "windows" };
+pub const CURRENT_OS: &str = if cfg!(target_os = "macos") {
+    "macos"
+} else if cfg!(target_os = "linux") {
+    "linux"
+} else {
+    "windows"
+};
 
 static CATALOG: LazyLock<Vec<Emulator>> = LazyLock::new(|| {
     serde_json::from_str::<Vec<Emulator>>(include_str!("../catalog.json"))
@@ -221,7 +230,8 @@ fn core_path(exe: &Path, core: &str) -> PathBuf {
             .join("Library/Application Support/RetroArch/cores")
             .join(format!("{core}_libretro.dylib"))
     } else {
-        exe.parent().unwrap_or(Path::new(".")).join("cores").join(format!("{core}_libretro.dll"))
+        let ext = if cfg!(windows) { "dll" } else { "so" };
+        exe.parent().unwrap_or(Path::new(".")).join("cores").join(format!("{core}_libretro.{ext}"))
     }
 }
 
@@ -261,7 +271,65 @@ pub fn command(
     if let Some(dir) = exe.parent() {
         cmd.current_dir(dir);
     }
+    // Own process group, so quitting also ends what it spawned (an AppImage
+    // runs the emulator as a child of its runtime).
+    #[cfg(unix)]
+    cmd.process_group(0);
+    #[cfg(target_os = "linux")]
+    for (key, value) in appimage_env_cleanup(std::env::vars()) {
+        match value {
+            Some(v) => cmd.env(key, v),
+            None => cmd.env_remove(key),
+        };
+    }
     Ok(cmd)
+}
+
+/// AetherPlay's AppImage points library / GTK / GStreamer variables into its
+/// own image; inherited, they break the emulators (often AppImages too).
+/// Returns the variables to change: entries inside the image are dropped,
+/// and a variable left empty is removed.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn appimage_env_cleanup(vars: impl Iterator<Item = (String, String)>) -> Vec<(String, Option<String>)> {
+    let vars: Vec<(String, String)> = vars.collect();
+    let Some(appdir) = vars.iter().find(|(k, _)| k == "APPDIR").map(|(_, v)| v.clone()).filter(|v| !v.is_empty())
+    else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for (key, value) in vars {
+        if ["APPDIR", "APPIMAGE", "ARGV0", "OWD"].contains(&key.as_str()) {
+            out.push((key, None));
+        } else if value.contains(&appdir) {
+            let kept: Vec<&str> = value.split(':').filter(|p| !p.is_empty() && !p.starts_with(&appdir)).collect();
+            out.push((key, (!kept.is_empty()).then(|| kept.join(":"))));
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+mod appimage_tests {
+    #[test]
+    fn strips_appimage_paths_from_child_environment() {
+        let vars = [
+            ("APPDIR", "/tmp/.mount_Aether"),
+            ("LD_LIBRARY_PATH", "/tmp/.mount_Aether/usr/lib"),
+            ("XDG_DATA_DIRS", "/tmp/.mount_Aether/usr/share:/usr/local/share:/usr/share"),
+            ("HOME", "/home/deck"),
+        ]
+        .map(|(k, v)| (k.to_string(), v.to_string()));
+        let mut out = super::appimage_env_cleanup(vars.into_iter());
+        out.sort();
+        assert_eq!(
+            out,
+            vec![
+                ("APPDIR".into(), None),
+                ("LD_LIBRARY_PATH".into(), None),
+                ("XDG_DATA_DIRS".into(), Some("/usr/local/share:/usr/share".into())),
+            ]
+        );
+    }
 }
 
 #[cfg(test)]

@@ -22,9 +22,46 @@
     });
   }
 
+  // macOS / Linux webviews do not reliably expose controllers: the Rust side
+  // reads them and sends "aep-gamepad", served here as navigator.getGamepads()
+  // so RomM's controller navigation works unchanged. Windows' WebView2 has
+  // native support and never receives these events.
+  if (!navigator.userAgent.includes("Windows")) {
+    let pad = null;
+    const toGamepad = (s) => ({
+      id: s.id || "AetherPlay",
+      index: 0,
+      connected: true,
+      mapping: "standard",
+      timestamp: performance.now(),
+      buttons: s.buttons.map((p) => ({ pressed: p, touched: p, value: p ? 1 : 0 })),
+      axes: s.axes,
+      vibrationActuator: null,
+    });
+    navigator.getGamepads = () => [pad, null, null, null];
+    const start = () =>
+      tauri().event.listen("aep-gamepad", ({ payload }) => {
+        const wasConnected = !!pad;
+        pad = payload.connected ? toGamepad(payload) : null;
+        if (pad && !wasConnected) {
+          const event = new Event("gamepadconnected");
+          event.gamepad = pad;
+          window.dispatchEvent(event);
+        }
+      });
+    if (tauri()) start();
+    else window.addEventListener("DOMContentLoaded", start, { once: true });
+  }
+
+  const os = navigator.userAgent.includes("Mac")
+    ? "darwin"
+    : navigator.userAgent.includes("Windows")
+      ? "win32"
+      : "linux";
+
   window.rommNative = {
     shellVersion: "AetherPlay 0.1.6",
-    os: navigator.userAgent.includes("Mac") ? "darwin" : "win32",
+    os,
     capabilities: ["launch-stage", "platform-support-all", "save-sync", "multi-disc", "launch-fullscreen"],
     launch: (request) => tauri().core.invoke("native_launch", { request }),
     cancel: (romId) => tauri().core.invoke("native_cancel", { romId }),

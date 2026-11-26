@@ -246,9 +246,15 @@ pub fn create_main_window(app: &AppHandle) -> tauri::Result<()> {
         .title("AetherPlay")
         .inner_size(1280.0, 800.0)
         .min_inner_size(900.0, 600.0)
+        .fullscreen(game_mode())
         .initialization_script(BRIDGE)
         .build()?;
     Ok(())
+}
+
+/// Running under Steam's Game Mode (SteamOS, gamescope): no desktop around.
+pub fn game_mode() -> bool {
+    ["SteamGamepadUI", "SteamDeck", "GAMESCOPE_WAYLAND_DISPLAY"].iter().any(|v| std::env::var_os(v).is_some())
 }
 
 pub fn open_romm(app: &AppHandle) -> tauri::Result<()> {

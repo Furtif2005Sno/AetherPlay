@@ -110,7 +110,10 @@ pub fn find_sdl(emulator: &Path, retroarch: Option<&Path>) -> Option<PathBuf> {
             candidates.push(dir.join("SDL3.dll"));
         }
     }
-    candidates.into_iter().find(|p| p.is_file())
+    candidates.into_iter().find(|p| p.is_file()).or_else(|| {
+        // AppImages keep their SDL inside the image: use the system's (SteamOS has one).
+        cfg!(target_os = "linux").then(|| PathBuf::from("libSDL3.so.0"))
+    })
 }
 
 /// Lists gamepads through `lib` with the hints Eden/Eglantine set by default.

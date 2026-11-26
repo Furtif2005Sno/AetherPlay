@@ -24,6 +24,17 @@ const error = ref("");
 let unlisten: (() => void) | undefined;
 
 const isMac = navigator.userAgent.includes("Mac");
+
+/** What each controller button does in AetherPlay (RomM's pad navigation). */
+const legend = [
+  ["Croix / stick gauche", "se déplacer"],
+  ["A", "valider"],
+  ["B", "retour"],
+  ["LB / RB", "section précédente / suivante"],
+  ["Start", "menu"],
+  ["Stick droit", "faire défiler"],
+  ["Select + Start (1,5 s)", "quitter le jeu"],
+];
 const cacheTotal = computed(() => cache.value.reduce((s, e) => s + e.bytes, 0));
 
 /** Consoles more than one emulator can run, with their candidates. */
@@ -152,6 +163,11 @@ onUnmounted(() => unlisten?.());
           description="Maintenir Select + Start 1,5 seconde ferme l'émulateur et revient à AetherPlay. L'interface se pilote entièrement à la manette."
           @update:model-value="(v: boolean) => run(() => app.setOption('quit_combo', v))"
         />
+        <div class="aep-legend">
+          <span v-for="[button, action] in legend" :key="button" class="aep-legend__item">
+            <kbd>{{ button }}</kbd> {{ action }}
+          </span>
+        </div>
       </div>
     </SettingsSection>
 
@@ -170,10 +186,6 @@ onUnmounted(() => unlisten?.());
             <div class="aep-muted aep-path">
               Sauvegardes :
               {{ saveDirs[emu.id]?.join(" · ") || "pas de synchronisation" }}
-              <a href="#" @click.prevent="pickSaves(emu)">modifier</a>
-              <a v-if="settings.save_dirs[emu.id]" href="#" @click.prevent="run(() => app.setSaveDir(emu.id, null))">
-                par défaut
-              </a>
             </div>
             <div v-if="typeof installs[emu.id] === 'string'" class="aep-error">{{ installs[emu.id] }}</div>
           </div>
@@ -200,6 +212,17 @@ onUnmounted(() => unlisten?.());
               @click="importSave(emu)"
             >
               Importer une sauvegarde…
+            </RBtn>
+            <RBtn size="small" variant="text" prepend-icon="mdi-folder-sync-outline" @click="pickSaves(emu)">
+              Dossier de sauvegardes…
+            </RBtn>
+            <RBtn
+              v-if="settings.save_dirs[emu.id]"
+              size="small"
+              variant="text"
+              @click="run(() => app.setSaveDir(emu.id, null))"
+            >
+              Dossier par défaut
             </RBtn>
             <RBtn size="small" variant="outlined" @click="pickExe(emu)">
               {{ isMac ? "Choisir l'app…" : "Choisir…" }}
@@ -307,8 +330,26 @@ onUnmounted(() => unlisten?.());
 }
 .aep-row__actions {
   display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 6px;
-  flex-shrink: 0;
+  max-width: 60%;
+}
+.aep-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  padding: 4px 16px 14px;
+  color: var(--r-color-fg-muted);
+  font-size: var(--r-font-size-sm);
+}
+.aep-legend kbd {
+  font: inherit;
+  font-weight: var(--r-font-weight-semibold, 600);
+  color: var(--r-color-fg);
+  padding: 1px 8px;
+  border-radius: var(--r-radius-pill);
+  border: 1px solid var(--r-color-border);
 }
 .aep-muted {
   color: var(--r-color-fg-muted);
@@ -337,10 +378,6 @@ onUnmounted(() => unlisten?.());
 .aep-notice {
   color: var(--r-color-status-success, #4ade80);
   font-size: var(--r-font-size-sm);
-}
-a {
-  color: var(--r-color-brand-primary);
-  margin-left: 6px;
 }
 .aep-prefs {
   display: grid;

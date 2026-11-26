@@ -155,6 +155,9 @@ fn extract(archive: &Path, name: &str, dest: &Path) -> Result<(), String> {
         }
     } else if lower.ends_with(".tar.xz") || lower.ends_with(".tar.gz") {
         run(Command::new("tar").arg("-xf").arg(archive).arg("-C").arg(dest))
+    } else if lower.ends_with(".appimage") {
+        // Already the program: keep it as is.
+        std::fs::copy(archive, dest.join(name)).map(|_| ()).map_err(err)
     } else if lower.ends_with(".dmg") {
         let mount = dest.join(".dmg-mount");
         run(Command::new("hdiutil")
@@ -236,8 +239,20 @@ pub async fn install(
     let (a, n, d, exe) = (archive.clone(), name.clone(), dir.clone(), source.exe.clone());
     let result = tokio::task::spawn_blocking(move || {
         extract(&a, &n, &d)?;
-        let found = if cfg!(target_os = "macos") { find_app(&d) } else { find_exe(&d, &exe) };
-        found.ok_or_else(|| "Exécutable introuvable après extraction".to_string())
+        let found = if cfg!(target_os = "macos") {
+            find_app(&d)
+        } else if cfg!(target_os = "linux") {
+            find_exe(&d, r"\.appimage$")
+        } else {
+            find_exe(&d, &exe)
+        };
+        let found = found.ok_or_else(|| "Exécutable introuvable après extraction".to_string())?;
+        #[cfg(unix)]
+        if !cfg!(target_os = "macos") {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&found, std::fs::Permissions::from_mode(0o755)).map_err(err)?;
+        }
+        Ok(found)
     })
     .await
     .map_err(err)?;
@@ -253,6 +268,8 @@ pub async fn ensure_core(core_path: &Path) -> Result<(), String> {
     let file = core_path.file_name().and_then(|n| n.to_str()).ok_or("Core invalide")?;
     let base = if cfg!(target_os = "macos") {
         "https://buildbot.libretro.com/nightly/apple/osx/arm64/latest"
+    } else if cfg!(target_os = "linux") {
+        "https://buildbot.libretro.com/nightly/linux/x86_64/latest"
     } else {
         "https://buildbot.libretro.com/nightly/windows/x86_64/latest"
     };
