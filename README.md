@@ -10,6 +10,7 @@ Licence : **AGPL-3.0** (comme RomM, dont l'interface est reprise).
 
 - **Windows** : [AetherPlay-Windows.msi](https://github.com/Furtif2005Sno/AetherPlay/releases/latest/download/AetherPlay-Windows.msi)
 - **Mac** (Apple Silicon) : [AetherPlay-Mac.dmg](https://github.com/Furtif2005Sno/AetherPlay/releases/latest/download/AetherPlay-Mac.dmg)
+- **SteamOS / Linux** (Steam Deck, ROG Ally…) : [AetherPlay-SteamOS.AppImage](https://github.com/Furtif2005Sno/AetherPlay/releases/latest/download/AetherPlay-SteamOS.AppImage)
 
 Ces liens donnent toujours la dernière version.
 
@@ -44,7 +45,18 @@ npm run tauri build    # générer l'installeur
 - [x] Choix de l'émulateur par console, dossiers de saves modifiables
 - [x] Mises à jour/DLC Switch chargées sans installation (Eden/Eglantine, `external_content_dirs`)
 - [x] Gestion du cache des ROMs (onglet Stockage)
-- [ ] CI de build Windows + macOS
+- [x] CI de build Windows + macOS + Linux (AppImage), release avec liens directs
+- [x] Interface pilotable à la manette (navigation RomM ; manette lue par AetherPlay sur macOS/Linux), Select+Start pour quitter un jeu
+- [x] Joueur 1 d'Eden/Eglantine réglé automatiquement sur la manette branchée
+
+## SteamOS : installation
+
+1. Passer en **mode Bureau**, télécharger `AetherPlay-SteamOS.AppImage` (lien ci-dessus) et le ranger, par exemple dans `~/Applications`.
+2. Clic droit sur le fichier > Propriétés > Permissions > cocher « Exécutable ».
+3. Ouvrir Steam > Jeux > « Ajouter un jeu non-Steam à ma bibliothèque » > Parcourir > choisir l'AppImage.
+4. Revenir en **mode Jeu** et lancer AetherPlay depuis la bibliothèque : plein écran, tout se fait à la manette (Steam + X pour le clavier virtuel à la première connexion).
+
+Les émulateurs s'installent depuis Réglages > AetherPlay (versions AppImage), les données restent dans `~/.local/share` et `~/.config`. Le mot de passe RomM est gardé dans `~/.local/share/aetherplay/credentials.json` (lisible par vous seul) car le mode Jeu n'a pas de trousseau.
 
 ## macOS : premier lancement
 
