@@ -94,6 +94,14 @@ pub struct Pad {
     gyro: bool,
 }
 
+#[cfg(test)]
+impl Pad {
+    /// A pad with no bindings, for tests of other modules.
+    pub fn test(name: &str) -> Self {
+        Pad { name: name.into(), guid: "00".into(), port: 0, bindings: Vec::new(), gyro: false }
+    }
+}
+
 /// SDL3 shipped with the emulator (macOS bundle, or next to the exe),
 /// else RetroArch's copy when it is installed.
 pub fn find_sdl(emulator: &Path, retroarch: Option<&Path>) -> Option<PathBuf> {
@@ -116,8 +124,35 @@ pub fn find_sdl(emulator: &Path, retroarch: Option<&Path>) -> Option<PathBuf> {
     })
 }
 
+/// SDL mapping of the AetherPlay Android controller over Bluetooth: its HID
+/// report lists 17 buttons in W3C standard order, then 4 stick axes.
+const PHONE_MAPPING: &str = "a:b0,b:b1,x:b2,y:b3,leftshoulder:b4,rightshoulder:b5,lefttrigger:b6,righttrigger:b7,\
+back:b8,start:b9,leftstick:b10,rightstick:b11,dpup:b12,dpdown:b13,dpleft:b14,dpright:b15,guide:b16,\
+leftx:a0,lefty:a1,rightx:a2,righty:a3";
+
+pub fn phone_mapping(guid: &str) -> String {
+    format!("{guid},AetherPlay Manette,{PHONE_MAPPING},")
+}
+
+/// What SDL sees: the gamepads, and SDL mappings for Android controllers
+/// connected over Bluetooth (SDL does not know them; the emulators get these
+/// through SDL_GAMECONTROLLERCONFIG).
+pub struct Detected {
+    pub pads: Vec<Pad>,
+    pub phone_mappings: Vec<String>,
+    /// Android controllers over Bluetooth, as the system names them (often
+    /// after the phone) — RetroArch needs that name in its profile.
+    pub phones: Vec<PhoneDevice>,
+}
+
+pub struct PhoneDevice {
+    pub name: String,
+    pub vendor: u16,
+    pub product: u16,
+}
+
 /// Lists gamepads through `lib` with the hints Eden/Eglantine set by default.
-pub fn detect(lib: &Path) -> Result<Vec<Pad>, String> {
+pub fn detect(lib: &Path) -> Result<Detected, String> {
     // SAFETY: the symbols are SDL3's public C API with the signatures below.
     unsafe {
         let sdl = Library::new(lib).map_err(|e| format!("SDL3 : {e}"))?;
@@ -140,6 +175,18 @@ pub fn detect(lib: &Path) -> Result<Vec<Pad>, String> {
             sym!(b"SDL_GetGamepadBindings\0", unsafe extern "C" fn(*mut c_void, *mut c_int) -> *mut *mut Binding);
         let has_sensor = sym!(b"SDL_GamepadHasSensor\0", unsafe extern "C" fn(*mut c_void, c_int) -> bool);
         let free = sym!(b"SDL_free\0", unsafe extern "C" fn(*mut c_void));
+        let get_joysticks = sym!(b"SDL_GetJoysticks\0", unsafe extern "C" fn(*mut c_int) -> *mut u32);
+        let joystick_name = sym!(b"SDL_GetJoystickNameForID\0", unsafe extern "C" fn(u32) -> *const c_char);
+        let is_gamepad = sym!(b"SDL_IsGamepad\0", unsafe extern "C" fn(u32) -> bool);
+        let guid_to_string = sym!(b"SDL_GUIDToString\0", unsafe extern "C" fn(Guid, *mut c_char, c_int));
+        let add_mapping = sym!(b"SDL_AddGamepadMapping\0", unsafe extern "C" fn(*const c_char) -> c_int);
+        let open_joystick = sym!(b"SDL_OpenJoystick\0", unsafe extern "C" fn(u32) -> *mut c_void);
+        let close_joystick = sym!(b"SDL_CloseJoystick\0", unsafe extern "C" fn(*mut c_void));
+        let count_buttons = sym!(b"SDL_GetNumJoystickButtons\0", unsafe extern "C" fn(*mut c_void) -> c_int);
+        let count_axes = sym!(b"SDL_GetNumJoystickAxes\0", unsafe extern "C" fn(*mut c_void) -> c_int);
+        let count_hats = sym!(b"SDL_GetNumJoystickHats\0", unsafe extern "C" fn(*mut c_void) -> c_int);
+        let vendor_of = sym!(b"SDL_GetJoystickVendorForID\0", unsafe extern "C" fn(u32) -> u16);
+        let product_of = sym!(b"SDL_GetJoystickProductForID\0", unsafe extern "C" fn(u32) -> u16);
 
         for (k, v) in [
             ("SDL_APP_NAME", "Eden"),
@@ -159,9 +206,46 @@ pub fn detect(lib: &Path) -> Result<Vec<Pad>, String> {
         if !init(0x200 | 0x2000) {
             return Err("SDL3 : initialisation impossible".into());
         }
+        // Android controllers over Bluetooth: give SDL their mapping first.
+        let mut phone_mappings = Vec::new();
+        let mut phones = Vec::new();
+        pump();
+        let mut n = 0;
+        let list = get_joysticks(&mut n);
+        if !list.is_null() {
+            for &id in std::slice::from_raw_parts(list, n.max(0) as usize) {
+                let name = joystick_name(id);
+                let name = if name.is_null() { String::new() } else { CStr::from_ptr(name).to_string_lossy().into_owned() };
+                if is_gamepad(id) {
+                    continue;
+                }
+                // Named after the phone by Linux / Windows: recognise its report
+                // layout instead (17 buttons, 4 axes, no hat).
+                let looks_like_phone = name.contains("AetherPlay") || {
+                    let j = open_joystick(id);
+                    let shape = !j.is_null() && count_buttons(j) == 17 && count_axes(j) == 4 && count_hats(j) == 0;
+                    if !j.is_null() {
+                        close_joystick(j);
+                    }
+                    shape
+                };
+                if !looks_like_phone {
+                    continue;
+                }
+                phones.push(PhoneDevice { name: name.clone(), vendor: vendor_of(id), product: product_of(id) });
+                let mut buf = [0 as c_char; 33];
+                guid_to_string(guid_of(id), buf.as_mut_ptr(), buf.len() as c_int);
+                let guid = CStr::from_ptr(buf.as_ptr()).to_string_lossy().into_owned();
+                let mapping = phone_mapping(&guid);
+                let c = format!("{mapping}\0");
+                add_mapping(c.as_ptr().cast());
+                phone_mappings.push(mapping);
+            }
+            free(list.cast());
+        }
         // Bluetooth / HIDAPI pads show up shortly after init.
         let mut ids = Vec::new();
-        for _ in 0..15 {
+        for _ in 0..8 {
             pump();
             let mut n = 0;
             let list = get_gamepads(&mut n);
@@ -206,7 +290,7 @@ pub fn detect(lib: &Path) -> Result<Vec<Pad>, String> {
             pads.push(Pad { name, guid, port, bindings, gyro });
         }
         quit();
-        Ok(pads)
+        Ok(Detected { pads, phone_mappings, phones })
     }
 }
 
@@ -271,10 +355,18 @@ impl Pad {
     }
 }
 
-/// Points player 1 at the first connected pad unless it already uses one of
-/// them (a mapping the user chose is kept). Returns the pad's name if changed.
+/// Players handled for multiplayer (RetroTogether): Eden/Eglantine know 8,
+/// four cover couch play.
+const MAX_PLAYERS: usize = 4;
+
+/// Gives each connected pad a player, in SDL's order: player 1 the first pad,
+/// player 2 the next one… A player already set to a connected pad, or to a
+/// device SDL does not handle (the user's choice), is kept. Returns a summary
+/// like "J1 Pro Controller, J2 AetherPlay Manette" if anything changed.
 pub fn apply(ini: &Path, pads: &[Pad]) -> Result<Option<String>, String> {
-    let Some(pad) = pads.first() else { return Ok(None) };
+    if pads.is_empty() {
+        return Ok(None);
+    }
     let text = std::fs::read_to_string(ini).unwrap_or_default();
     let mut lines: Vec<String> = text.lines().map(str::to_owned).collect();
 
@@ -292,25 +384,53 @@ pub fn apply(ini: &Path, pads: &[Pad]) -> Result<Option<String>, String> {
     let get = |key: &str| {
         lines[start + 1..end].iter().find_map(|l| l.strip_prefix(&format!("{key}=")).map(|v| v.trim_matches('"').to_string()))
     };
-    let custom = get("player_0_button_a\\default").is_some_and(|d| d == "false");
-    if custom && let Some(current) = get("player_0_button_a") {
-        let connected: HashSet<&str> = pads.iter().map(|p| p.guid.as_str()).collect();
-        let uses_pad = current.contains("engine:sdl")
-            && current.split(',').filter_map(|kv| kv.strip_prefix("guid:")).any(|g| connected.contains(g));
-        let other_engine = !current.contains("engine:sdl") && !current.contains("engine:keyboard");
-        if uses_pad || other_engine {
-            return Ok(None);
+    let pad_of = |value: &str| {
+        let field = |k: &str| value.split(',').find_map(|kv| kv.strip_prefix(k)).map(str::to_owned);
+        let (guid, port) = (field("guid:")?, field("port:").and_then(|p| p.parse::<usize>().ok()).unwrap_or(0));
+        pads.iter().position(|p| p.guid == guid && p.port == port)
+    };
+
+    // Which pad each player uses now, and which players keep their setting.
+    let mut taken = vec![false; pads.len()];
+    let mut keep = [false; MAX_PLAYERS];
+    for (player, kept) in keep.iter_mut().enumerate() {
+        if get(&format!("player_{player}_button_a\\default")).is_none_or(|d| d != "false") {
+            continue;
+        }
+        let Some(current) = get(&format!("player_{player}_button_a")) else { continue };
+        if current.contains("engine:sdl") {
+            if let Some(i) = pad_of(&current) {
+                taken[i] = true;
+                *kept = true;
+            }
+        } else if !current.contains("engine:keyboard") {
+            *kept = true;
         }
     }
 
-    let mapping = pad.mapping();
-    if mapping.is_empty() {
+    let mut writes: Vec<(String, String)> = Vec::new();
+    let mut summary = Vec::new();
+    let mut free = (0..pads.len()).filter(|i| !taken[*i]);
+    for (player, kept) in keep.iter().enumerate() {
+        if *kept {
+            continue;
+        }
+        let Some(i) = free.next() else { break };
+        let mapping = pads[i].mapping();
+        if mapping.is_empty() {
+            continue;
+        }
+        writes.extend(mapping.into_iter().map(|(k, v)| (format!("player_{player}_{k}"), format!("\"{v}\""))));
+        if player > 0 {
+            writes.push((format!("player_{player}_connected"), "true".into()));
+        }
+        summary.push(format!("J{} {}", player + 1, pads[i].name));
+    }
+    if writes.is_empty() {
         return Ok(None);
     }
-    let keys: HashSet<String> = mapping
-        .iter()
-        .flat_map(|(k, _)| [format!("player_0_{k}"), format!("player_0_{k}\\default")])
-        .collect();
+
+    let keys: HashSet<String> = writes.iter().flat_map(|(k, _)| [k.clone(), format!("{k}\\default")]).collect();
     let mut section: Vec<String> = lines[start + 1..end]
         .iter()
         .filter(|l| l.split_once('=').is_none_or(|(k, _)| !keys.contains(k)))
@@ -319,9 +439,9 @@ pub fn apply(ini: &Path, pads: &[Pad]) -> Result<Option<String>, String> {
     while section.last().is_some_and(|l| l.trim().is_empty()) {
         section.pop();
     }
-    for (k, v) in &mapping {
-        section.push(format!("player_0_{k}\\default=false"));
-        section.push(format!("player_0_{k}=\"{v}\""));
+    for (k, v) in &writes {
+        section.push(format!("{k}\\default=false"));
+        section.push(format!("{k}={v}"));
     }
     section.push(String::new());
     lines.splice(start + 1..end, section);
@@ -329,7 +449,7 @@ pub fn apply(ini: &Path, pads: &[Pad]) -> Result<Option<String>, String> {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
     std::fs::write(ini, lines.join("\n") + "\n").map_err(|e| e.to_string())?;
-    Ok(Some(pad.name.clone()))
+    Ok(Some(summary.join(", ")))
 }
 
 #[cfg(test)]
@@ -360,7 +480,9 @@ mod tests {
     #[ignore]
     fn detect_real() {
         let lib = std::env::var("SDL_LIB").expect("SDL_LIB");
-        for p in detect(Path::new(&lib)).unwrap() {
+        let found = detect(Path::new(&lib)).unwrap();
+        println!("mappings Android : {:?}", found.phone_mappings);
+        for p in found.pads {
             println!("{} guid={} port={}", p.name, p.guid, p.port);
             for (k, v) in p.mapping() {
                 println!("  player_0_{k}={v}");
@@ -376,7 +498,7 @@ mod tests {
             "[Controls]\nplayer_0_button_a\\default=true\nplayer_0_button_a=\"engine:keyboard,code:67\"\nvibration_enabled=true\n[UI]\ntheme=dark\n",
         )
         .unwrap();
-        assert_eq!(apply(&ini, &[pad()]).unwrap().as_deref(), Some("Pro Controller"));
+        assert_eq!(apply(&ini, &[pad()]).unwrap().as_deref(), Some("J1 Pro Controller"));
         let out = std::fs::read_to_string(&ini).unwrap();
         assert!(out.contains("player_0_button_a\\default=false\nplayer_0_button_a=\"engine:sdl,guid:0500000000000000000000000000ff00,port:0,button:1\""));
         assert!(out.contains("player_0_button_zl=\"engine:sdl,guid:0500000000000000000000000000ff00,port:0,axis:4,invert:+,threshold:0.5\""));
@@ -386,6 +508,15 @@ mod tests {
         assert!(!out.contains("engine:keyboard"));
         // Second launch with the same pad: left alone.
         assert_eq!(apply(&ini, &[pad()]).unwrap(), None);
+        // A second controller arrives (RetroTogether): it becomes player 2.
+        let mut phone = pad();
+        phone.name = "AetherPlay Manette".into();
+        phone.guid = "05000000aaaa00000000000000000000".into();
+        assert_eq!(apply(&ini, &[pad(), phone]).unwrap().as_deref(), Some("J2 AetherPlay Manette"));
+        let out = std::fs::read_to_string(&ini).unwrap();
+        assert!(out.contains("player_1_connected\\default=false\nplayer_1_connected=true"));
+        assert!(out.contains("player_1_button_a=\"engine:sdl,guid:05000000aaaa00000000000000000000,port:0,button:1\""));
+        assert!(out.contains("player_0_button_a=\"engine:sdl,guid:0500000000000000000000000000ff00,port:0,button:1\""));
         let _ = std::fs::remove_file(&ini);
     }
 }

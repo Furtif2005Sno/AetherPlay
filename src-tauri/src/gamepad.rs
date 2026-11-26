@@ -16,6 +16,25 @@ use tauri::{AppHandle, Emitter, Manager};
 
 /// Process id of the emulator currently running, if any.
 static RUNNING: Mutex<Option<u32>> = Mutex::new(None);
+/// Android controllers' state by connection (buttons in W3C order, axes), see phone.rs.
+static REMOTE: Mutex<Vec<(u64, u32, [f32; 4])>> = Mutex::new(Vec::new());
+
+pub fn set_remote(phone: u64, state: Option<(u32, [f32; 4])>) {
+    let mut all = REMOTE.lock().expect("remote lock");
+    all.retain(|(id, _, _)| *id != phone);
+    if let Some((b, a)) = state {
+        all.push((phone, b, a));
+    }
+}
+
+fn remote() -> Vec<(u32, [f32; 4])> {
+    REMOTE.lock().expect("remote lock").iter().map(|(_, b, a)| (*b, *a)).collect()
+}
+
+/// Closes the running game (the phone's "Quitter le jeu" button).
+pub fn quit_game() {
+    kill_running();
+}
 const HOLD: Duration = Duration::from_millis(1500);
 
 pub fn set_running(pid: Option<u32>) {
@@ -91,6 +110,37 @@ fn state_of(g: &Gamepad) -> PadState {
     }
 }
 
+/// What the interface sees: every controller merged into one, the phone included.
+fn ui_state(gilrs: &Gilrs, live: bool) -> PadState {
+    let mut pads: Vec<PadState> = gilrs.gamepads().map(|(_, g)| state_of(&g)).collect();
+    for (b, axes) in remote() {
+        pads.push(PadState {
+            connected: true,
+            id: "AetherPlay Android".into(),
+            buttons: (0..STANDARD_BUTTONS.len()).map(|i| b & (1 << i) != 0).collect(),
+            axes: axes.iter().map(|a| (a * 20.0).round() / 20.0).collect(),
+        });
+    }
+    let Some(first) = pads.first() else { return PadState::default() };
+    let mut merged = PadState { connected: true, id: first.id.clone(), ..PadState::default() };
+    if !live {
+        return merged;
+    }
+    merged.buttons = vec![false; STANDARD_BUTTONS.len()];
+    merged.axes = vec![0.0; 4];
+    for p in &pads {
+        for (m, b) in merged.buttons.iter_mut().zip(&p.buttons) {
+            *m |= *b;
+        }
+        for (m, a) in merged.axes.iter_mut().zip(&p.axes) {
+            if a.abs() > m.abs() {
+                *m = *a;
+            }
+        }
+    }
+    merged
+}
+
 pub fn spawn_watcher(app: AppHandle) {
     std::thread::spawn(move || {
         let Ok(mut gilrs) = Gilrs::new() else { return };
@@ -99,7 +149,9 @@ pub fn spawn_watcher(app: AppHandle) {
         let mut sent = PadState::default();
         loop {
             while gilrs.next_event_blocking(Some(Duration::from_millis(16))).is_some() {}
-            let combo = gilrs.gamepads().any(|(_, g)| g.is_pressed(Button::Select) && g.is_pressed(Button::Start));
+            let phone_combo = remote().iter().any(|(b, _)| b & (1 << 8) != 0 && b & (1 << 9) != 0);
+            let combo = phone_combo
+                || gilrs.gamepads().any(|(_, g)| g.is_pressed(Button::Select) && g.is_pressed(Button::Start));
             match (combo, held_since) {
                 (true, None) => held_since = Some(Instant::now()),
                 (true, Some(t)) if t.elapsed() >= HOLD => {
@@ -115,11 +167,7 @@ pub fn spawn_watcher(app: AppHandle) {
             if feed_ui {
                 // Only while the interface is in front: never drive it from a game.
                 let focused = app.get_webview_window("main").and_then(|w| w.is_focused().ok()).unwrap_or(false);
-                let state = match gilrs.gamepads().next() {
-                    Some((_, g)) if focused && !is_running() => state_of(&g),
-                    Some((_, g)) => PadState { connected: true, id: g.name().to_string(), ..PadState::default() },
-                    None => PadState::default(),
-                };
+                let state = ui_state(&gilrs, focused && !is_running());
                 if state != sent {
                     let _ = app.emit_to("main", "aep-gamepad", &state);
                     sent = state;

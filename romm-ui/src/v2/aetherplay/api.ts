@@ -49,6 +49,13 @@ export interface CacheEntry {
 
 const invoke = <T>(cmd: string, args?: Record<string, unknown>) => tauri().core.invoke<T>(cmd, args);
 
+/** Android controller link (pairing code, connected phones = players). */
+export interface PhoneStatus {
+  pin: string;
+  port: number;
+  phones: { name: string; player: number }[];
+}
+
 export const app = {
   settings: () => invoke<AppSettings>("get_settings"),
   catalog: () => invoke<Emulator[]>("catalog"),
@@ -67,6 +74,8 @@ export const app = {
   openAppSettings: () => invoke<void>("open_settings"),
   importSave: (id: string, path: string) => invoke<ImportReport>("import_save", { id, path }),
   openLog: () => invoke<void>("open_log"),
+  phoneStatus: () => invoke<PhoneStatus>("phone_status"),
+  phoneForget: () => invoke<void>("phone_forget"),
   onInstallProgress: (handler: (p: { id: string; done: number; total: number }) => void) =>
     tauri().event.listen<{ id: string; done: number; total: number }>("install-progress", (e) => handler(e.payload)),
 };

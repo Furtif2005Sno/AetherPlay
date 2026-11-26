@@ -98,6 +98,18 @@ impl Client {
         self.send(self.get(url)).await?.json().await.map_err(err)
     }
 
+    /// Small cover image bytes (shown on the Android controller), if RomM has one.
+    pub async fn cover(&self, rom: &Rom) -> Option<Vec<u8>> {
+        let path = rom.path_cover_small.as_deref().filter(|p| !p.is_empty())?;
+        let url = if path.starts_with('/') {
+            self.base.join(path).ok()?
+        } else {
+            self.base.join(&format!("assets/romm/resources/{path}")).ok()?
+        };
+        let res = self.send(self.get(url)).await.ok()?;
+        res.bytes().await.ok().map(|b| b.to_vec()).filter(|b| b.len() < 2 << 20)
+    }
+
     pub async fn rom(&self, id: u64) -> Result<Rom, String> {
         self.json(self.url(&["api", "roms", &id.to_string()])).await
     }

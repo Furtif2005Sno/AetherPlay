@@ -5,6 +5,8 @@ mod emulators;
 mod gamepad;
 mod import;
 mod install;
+mod phone;
+mod players;
 mod romm;
 mod roms;
 mod saves;
@@ -256,26 +258,50 @@ async fn launch(app: AppHandle, rom_id: u64, fullscreen: bool) -> Result<LaunchR
         emulators::register_external_content(&ini, &dest)
             .map_err(|e| fail("launch-failed", format!("Configuration des mises à jour/DLC : {e}")))?;
     }
-    // Eden/Eglantine start keyboard-only: point player 1 at the connected pad.
-    if let Some(ini) = emu.config_ini(exe, &vars) {
-        let retroarch = cfg.emulator_paths.get("retroarch").map(PathBuf::from);
-        match controller::find_sdl(std::path::Path::new(exe), retroarch.as_deref()) {
-            Some(lib) => {
-                let res = tauri::async_runtime::spawn_blocking(move || {
-                    let pads = controller::detect(&lib)?;
-                    controller::apply(&ini, &pads)
-                })
-                .await
-                .map_err(|e| e.to_string())
-                .and_then(|r| r);
-                match res {
-                    Ok(Some(name)) => shell::log(&app, &format!("manette : joueur 1 -> {name}")),
-                    Ok(None) => shell::log(&app, "manette : configuration inchangée"),
-                    Err(e) => shell::log(&app, &format!("manette : {e}")),
+    // Controllers as SDL sees them: Android controllers over Bluetooth get an
+    // SDL mapping (passed to the emulator), and Eden/Eglantine, which start
+    // keyboard-only, get player 1 pointed at the connected pad.
+    let retroarch = cfg.emulator_paths.get("retroarch").map(PathBuf::from);
+    let mut phone_mappings = Vec::new();
+    match controller::find_sdl(std::path::Path::new(exe), retroarch.as_deref()) {
+        Some(lib) => {
+            let ini = emu.config_ini(exe, &vars);
+            let (emu_id, exe_path) = (emu.id.clone(), PathBuf::from(exe));
+            let save_dir = emu.save_dirs(exe, Some(&target), &vars, &cfg.save_dirs).into_iter().next();
+            let res = tauri::async_runtime::spawn_blocking(move || {
+                let found = controller::detect(&lib)?;
+                // RetroTogether: each controller becomes a player in the emulator.
+                let players = match (emu_id.as_str(), &ini, &save_dir) {
+                    (_, Some(ini), _) => controller::apply(ini, &found.pads)?,
+                    ("pcsx2", _, Some(dir)) => Some(players::pcsx2(dir, &found.pads)?.join(", ")),
+                    ("duckstation", _, Some(dir)) => Some(players::duckstation(dir, &found.pads)?.join(", ")),
+                    ("dolphin", _, Some(dir)) => Some(players::dolphin(dir, &found.pads)?.join(", ")),
+                    ("retroarch", _, _) => {
+                        players::retroarch(&exe_path, &found.phones)?;
+                        None
+                    }
+                    _ => None,
                 }
+                .filter(|s| !s.is_empty());
+                Ok::<_, String>((found.phone_mappings, players))
+            })
+            .await
+            .map_err(|e| e.to_string())
+            .and_then(|r| r);
+            match res {
+                Ok((mappings, applied)) => {
+                    if !mappings.is_empty() {
+                        shell::log(&app, "manette : manette Android (Bluetooth) détectée");
+                    }
+                    if let Some(name) = applied {
+                        shell::log(&app, &format!("manette : {name}"));
+                    }
+                    phone_mappings = mappings;
+                }
+                Err(e) => shell::log(&app, &format!("manette : {e}")),
             }
-            None => shell::log(&app, "manette : SDL3 introuvable, configuration inchangée"),
         }
+        None => shell::log(&app, "manette : SDL3 introuvable, configuration inchangée"),
     }
     let save_dirs = emu.save_dirs(exe, Some(&target), &vars, &cfg.save_dirs);
     shell::log(&app, &format!("launch rom={rom_id} ({}) : {} via {}, saves {:?}", rom.fs_name, rom.platform_slug, emu.name, save_dirs));
@@ -311,15 +337,28 @@ async fn launch(app: AppHandle, rom_id: u64, fullscreen: bool) -> Result<LaunchR
 
     let started = std::time::SystemTime::now();
     let mut child = emulators::command(emu, exe, &rom.platform_slug, &target, fullscreen || cfg.fullscreen, save_dirs.first().map(PathBuf::as_path))
-        .and_then(|mut c| c.spawn().map_err(|e| format!("Impossible de lancer {} : {e}", emu.name)))
+        .and_then(|mut c| {
+            if !phone_mappings.is_empty() {
+                let mut all = std::env::var("SDL_GAMECONTROLLERCONFIG").unwrap_or_default();
+                for m in &phone_mappings {
+                    all.push('\n');
+                    all.push_str(m);
+                }
+                c.env("SDL_GAMECONTROLLERCONFIG", all.trim());
+            }
+            c.spawn().map_err(|e| format!("Impossible de lancer {} : {e}", emu.name))
+        })
         .map_err(|e| fail("launch-failed", e))?;
     gamepad::set_running(child.id());
     launch_state(&app, rom_id, json!({ "status": "running" }));
+    // The Android controller switches to this console's layout.
+    phone::game_started(&rom, client.cover(&rom).await);
 
     let app2 = app.clone();
     tauri::async_runtime::spawn(async move {
         let code = child.wait().await.ok().and_then(|s| s.code());
         gamepad::set_running(None);
+        phone::game_ended();
         // Back to the library, ready for the next pick with the controller.
         if let Some(win) = app2.get_webview_window("main") {
             let _ = win.set_focus();
@@ -457,6 +496,20 @@ fn open_log(app: AppHandle) -> Result<(), String> {
     tauri_plugin_opener::reveal_item_in_dir(file).map_err(|e| e.to_string())
 }
 
+/// Android controller: pairing code, port, connected phones.
+#[tauri::command]
+fn phone_status() -> serde_json::Value {
+    phone::status()
+}
+
+/// Forgets every paired phone (they will need the code again).
+#[tauri::command]
+fn phone_forget(app: AppHandle) -> Result<(), String> {
+    let mut cfg = config::load(&app);
+    cfg.phones.clear();
+    config::save(&app, &cfg)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -470,6 +523,7 @@ pub fn run() {
         .setup(|app| {
             shell::create_main_window(app.handle())?;
             gamepad::spawn_watcher(app.handle().clone());
+            phone::start(app.handle().clone());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -493,7 +547,9 @@ pub fn run() {
             set_option,
             pick_path,
             import_save,
-            open_log
+            open_log,
+            phone_status,
+            phone_forget
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

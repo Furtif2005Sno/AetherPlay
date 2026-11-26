@@ -9,6 +9,7 @@ import {
   type AppSettings,
   type CacheEntry,
   type Emulator,
+  type PhoneStatus,
 } from "@/v2/aetherplay/api";
 import SettingsSection from "@/v2/components/Settings/SettingsSection.vue";
 import SettingsToggleRow from "@/v2/components/Settings/SettingsToggleRow.vue";
@@ -22,6 +23,16 @@ const cache = ref<CacheEntry[]>([]);
 const installs = ref<Record<string, number | string>>({});
 const error = ref("");
 let unlisten: (() => void) | undefined;
+const phone = ref<PhoneStatus | null>(null);
+let phoneTimer: ReturnType<typeof setInterval> | undefined;
+const refreshPhone = async () => {
+  phone.value = await app.phoneStatus();
+};
+async function forgetPhones() {
+  if (confirm("Oublier tous les téléphones associés ? Ils devront retaper le code.")) {
+    await run(() => app.phoneForget());
+  }
+}
 
 const isMac = navigator.userAgent.includes("Mac");
 
@@ -129,6 +140,8 @@ const preferredItems = (emus: Emulator[]) => [
 
 onMounted(async () => {
   [catalog.value, installable.value] = await Promise.all([app.catalog(), app.installable()]);
+  await refreshPhone();
+  phoneTimer = setInterval(refreshPhone, 2000);
   await refresh();
   unlisten = await app.onInstallProgress(({ id, done, total }) => {
     if (typeof installs.value[id] === "number" || installs.value[id] === undefined) {
@@ -136,7 +149,10 @@ onMounted(async () => {
     }
   });
 });
-onUnmounted(() => unlisten?.());
+onUnmounted(() => {
+  unlisten?.();
+  clearInterval(phoneTimer);
+});
 </script>
 
 <template>
@@ -169,6 +185,27 @@ onUnmounted(() => unlisten?.());
           </span>
         </div>
       </div>
+    </SettingsSection>
+
+    <SettingsSection v-if="phone" title="Manette Android · RetroTogether" icon="mdi-cellphone-link">
+      <template #header-actions>
+        <RBtn size="small" variant="text" @click="forgetPhones">Oublier les téléphones</RBtn>
+      </template>
+      <div class="aep-row">
+        <div class="aep-row__info">
+          <div class="aep-row__title">Code d'association : <span class="aep-pin">{{ phone.pin }}</span></div>
+          <div class="aep-muted">
+            Dans l'app AetherPlay sur Android (même Wi-Fi), choisis cet ordinateur puis tape ce code, une seule fois.
+            Chaque téléphone connecté est un joueur : plusieurs téléphones = partie à plusieurs.
+          </div>
+        </div>
+      </div>
+      <div v-for="p in phone.phones" :key="p.player" class="aep-row">
+        <div class="aep-row__info">
+          <div class="aep-row__title"><span class="aep-tag">J{{ p.player }}</span> {{ p.name }}</div>
+        </div>
+      </div>
+      <p v-if="!phone.phones.length" class="aep-muted aep-pad">Aucun téléphone connecté.</p>
     </SettingsSection>
 
     <SettingsSection title="Émulateurs" icon="mdi-gamepad-variant-outline">
@@ -334,6 +371,11 @@ onUnmounted(() => unlisten?.());
   justify-content: flex-end;
   gap: 6px;
   max-width: 60%;
+}
+.aep-pin {
+  font-family: var(--r-font-mono, monospace);
+  letter-spacing: 0.2em;
+  color: var(--r-color-brand-primary);
 }
 .aep-legend {
   display: flex;

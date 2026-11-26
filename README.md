@@ -11,6 +11,7 @@ Licence : **AGPL-3.0** (comme RomM, dont l'interface est reprise).
 - **Windows** : [AetherPlay-Windows.msi](https://github.com/Furtif2005Sno/AetherPlay/releases/latest/download/AetherPlay-Windows.msi)
 - **Mac** (Apple Silicon) : [AetherPlay-Mac.dmg](https://github.com/Furtif2005Sno/AetherPlay/releases/latest/download/AetherPlay-Mac.dmg)
 - **SteamOS / Linux** (Steam Deck, ROG Ally…) : [AetherPlay-SteamOS.AppImage](https://github.com/Furtif2005Sno/AetherPlay/releases/latest/download/AetherPlay-SteamOS.AppImage)
+- **Android** (le téléphone comme manette) : [AetherPlay-Android.apk](https://github.com/Furtif2005Sno/AetherPlay/releases/latest/download/AetherPlay-Android.apk)
 
 Ces liens donnent toujours la dernière version.
 
@@ -48,6 +49,15 @@ npm run tauri build    # générer l'installeur
 - [x] CI de build Windows + macOS + Linux (AppImage), release avec liens directs
 - [x] Interface pilotable à la manette (navigation RomM ; manette lue par AetherPlay sur macOS/Linux), Select+Start pour quitter un jeu
 - [x] Joueur 1 d'Eden/Eglantine réglé automatiquement sur la manette branchée
+
+## Manette Android et RetroTogether
+
+L'app Android (`android/`, protocole dans `android/PROTOCOL.md`) fait du téléphone une manette :
+
+- **Bluetooth** : le téléphone devient une vraie manette sans fil, pour Windows, Mac ou SteamOS. Première fois : dans l'app, « Rendre le téléphone visible », puis sur l'ordinateur, réglages Bluetooth > Ajouter un appareil > « AetherPlay Manette ».
+- **Wi-Fi** : l'app trouve AetherPlay sur le réseau. Tape une seule fois le code affiché dans Réglages > AetherPlay > Manette Android. La manette change d'aspect selon la console du jeu lancé (SNES, N64, PlayStation, Switch…) et affiche la jaquette. Le Wi-Fi pilote aussi les menus et sert de secours sans Bluetooth (manette virtuelle sous SteamOS, ou Windows avec [ViGEmBus](https://github.com/nefarius/ViGEmBus)).
+- **Personnaliser** (icône réglages de la manette) : glisser les boutons, les agrandir ou les réduire, réglages gardés par console.
+- **RetroTogether** : chaque téléphone connecté est un joueur (J1, J2…). AetherPlay attribue les manettes aux joueurs dans l'ordre, pour RetroArch, Eden, Eglantine, PCSX2, DuckStation et Dolphin (GameCube). Cemu, RPCS3, melonDS et Azahar se règlent pour l'instant dans l'émulateur.
 
 ## SteamOS : installation
 

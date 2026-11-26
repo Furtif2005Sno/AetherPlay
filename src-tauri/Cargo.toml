@@ -1,6 +1,6 @@
 [package]
 name = "aetherplay"
-version = "0.1.7"
+version = "0.2.0"
 description = "Client desktop pour RomM"
 authors = ["Anthares74"]
 edition = "2024"
@@ -18,7 +18,7 @@ tauri-plugin-opener = "2"
 tauri-plugin-dialog = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-tokio = { version = "1", features = ["fs", "io-util", "process", "rt"] }
+tokio = { version = "1", features = ["fs", "io-util", "process", "rt", "net", "sync", "macros", "time"] }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "stream", "multipart", "cookies"] }
 futures-util = "0.3"
 zip = { version = "9.8.2", default-features = false, features = ["deflate"] }
@@ -28,9 +28,19 @@ sevenz-rust2 = "0.27.0"
 base64 = "0.23.1"
 gilrs = { version = "0.11.2", default-features = false, features = ["xinput"] }
 libloading = "0.8"
+tokio-tungstenite = "0.27"
+mdns-sd = "0.13"
+gethostname = "1"
+getrandom = "0.3"
 
 [target.'cfg(not(target_os = "linux"))'.dependencies]
 keyring = { version = "3", features = ["windows-native", "apple-native"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+evdev = "0.13"
+
+[target.'cfg(windows)'.dependencies]
+vigem-client = "0.1"
 
 [profile.release]
 codegen-units = 1

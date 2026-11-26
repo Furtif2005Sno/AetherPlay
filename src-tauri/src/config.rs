@@ -24,6 +24,9 @@ pub struct Config {
     /// Holding Select + Start on a controller quits the running game.
     #[serde(default = "default_true")]
     pub quit_combo: bool,
+    /// Paired Android controllers: token -> phone name.
+    #[serde(default)]
+    pub phones: HashMap<String, String>,
 }
 
 fn default_true() -> bool {
@@ -40,6 +43,7 @@ impl Default for Config {
             save_dirs: HashMap::new(),
             fullscreen: false,
             quit_combo: true,
+            phones: HashMap::new(),
         }
     }
 }
