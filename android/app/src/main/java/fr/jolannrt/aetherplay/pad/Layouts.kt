@@ -32,7 +32,14 @@ data class PadLayout(
     val background: Long,
     val accent: Long,
     val controls: List<Control>,
+    /** Controller silhouette drawn behind the buttons. */
+    val body: Body = Body(BodyShape.NONE, 0),
 )
+
+enum class BodyShape { NONE, DOGBONE, BRICK, TRIDENT, HANDLES, JOYCONS, HANDHELD, PANEL }
+
+/** Silhouette and colours: main body, inner panel / screen, accent. */
+data class Body(val shape: BodyShape, val main: Long, val second: Long = main, val accent: Long = main)
 
 /** Face buttons in standard order: bottom, right, left, top. */
 private data class Face(val labels: List<String>, val fills: List<Long>, val texts: List<Long>)
@@ -101,17 +108,22 @@ private fun sticksLow() = listOf(
 
 private val DPAD = Control.Dpad(0.17f, 0.58f)
 
-private fun xboxLike(title: String, bg: Long = 0xFF15181D, accent: Long = 0xFF2E9D4F) = PadLayout(
+private fun xboxLike(title: String, bg: Long = 0xFF15181D, accent: Long = 0xFF2E9D4F, body: Long = 0xFF2A2D33) = PadLayout(
     title, bg, accent,
     sticksHigh() + face(XBOX) + shoulders("LB", "RB", "LT", "RT") + center("◧", "≡", "⌂"),
+    Body(BodyShape.HANDLES, body, 0xFF1E2024),
 )
 
-private fun sony(title: String, home: Boolean, bg: Long = 0xFF1B1F2B) = PadLayout(
+private fun sony(title: String, home: Boolean, bg: Long = 0xFF1B1F2B, body: Long = 0xFF1E1F26, panel: Long = 0xFF15161B) = PadLayout(
     title, bg, 0xFF8FA8F5,
     sticksLow() + face(SONY) + shoulders("L1", "R1", "L2", "R2") + center("SELECT", "START", if (home) "PS" else null),
+    Body(BodyShape.HANDLES, body, panel),
 )
 
-private fun twoButtons(title: String, bg: Long, accent: Long, b: String, a: String, fill: Long, l: String? = null, r: String? = null) =
+private fun twoButtons(
+    title: String, bg: Long, accent: Long, b: String, a: String, fill: Long,
+    l: String? = null, r: String? = null, body: Body = Body(BodyShape.NONE, 0),
+) =
     PadLayout(
         title, bg, accent,
         listOf(
@@ -119,6 +131,7 @@ private fun twoButtons(title: String, bg: Long, accent: Long, b: String, a: Stri
             Control.Button(Btn.SOUTH, b, 0.76f, 0.64f, 0.085f, fill),
             Control.Button(Btn.EAST, a, 0.9f, 0.52f, 0.085f, fill),
         ) + shoulders(l, r) + center("SELECT", "START"),
+        body,
     )
 
 /** Controller for the AetherPlay menus (RomM's interface): A confirms, B goes back. */
@@ -129,10 +142,12 @@ val MENU = PadLayout(
 
 fun layoutFor(platform: String?): PadLayout = when (platform) {
     null, "" -> MENU
-    "nes", "famicom" -> twoButtons("NES", 0xFF26262B, 0xFFD13B3B, "B", "A", 0xFFC83737)
+    "nes", "famicom" -> twoButtons("NES", 0xFF26262B, 0xFFD13B3B, "B", "A", 0xFFC83737,
+        body = Body(BodyShape.BRICK, 0xFFBDBDC2, 0xFF1E1E21, 0xFFC83737))
     "snes", "sfam" -> PadLayout(
         "Super Nintendo", 0xFF2A2735, 0xFF7B68D9,
         listOf(DPAD) + face(SNES) + shoulders("L", "R") + center("SELECT", "START"),
+        Body(BodyShape.DOGBONE, 0xFFCFCDD6, 0xFFB4B0C2, 0xFF9C94BE),
     )
     "n64" -> PadLayout(
         "Nintendo 64", 0xFF1E2028, 0xFF2F6FDB,
@@ -147,30 +162,39 @@ fun layoutFor(platform: String?): PadLayout = when (platform) {
             Control.Button(-1, "▶", 0.94f, 0.37f, 0.055f, 0xFFE2B93B, 0xFF1E2028, axis = 2, axisValue = 1f),
             pill(Btn.LT, "Z", 0.36f, 0.3f),
         ) + shoulders("L", "R") + center(null, "START"),
+        Body(BodyShape.TRIDENT, 0xFF8E8E97, 0xFF6C6C75),
     )
-    "gb" -> twoButtons("Game Boy", 0xFF2B2E26, 0xFF9BBC0F, "B", "A", 0xFF8E2A5C)
-    "gbc" -> twoButtons("Game Boy Color", 0xFF2A2338, 0xFF8E5CD9, "B", "A", 0xFF8E2A5C)
-    "gba" -> twoButtons("Game Boy Advance", 0xFF27234A, 0xFF5B54C9, "B", "A", 0xFF3A3480, "L", "R")
+    "gb" -> twoButtons("Game Boy", 0xFF2B2E26, 0xFF9BBC0F, "B", "A", 0xFF8E2A5C,
+        body = Body(BodyShape.HANDHELD, 0xFFC9C5BA, 0xFF8BAC0F))
+    "gbc" -> twoButtons("Game Boy Color", 0xFF2A2338, 0xFF8E5CD9, "B", "A", 0xFF8E2A5C,
+        body = Body(BodyShape.HANDHELD, 0xFF6B4FA0, 0xFF9EB8A0))
+    "gba" -> twoButtons("Game Boy Advance", 0xFF27234A, 0xFF5B54C9, "B", "A", 0xFF3A3480, "L", "R",
+        body = Body(BodyShape.HANDHELD, 0xFF4B44A8, 0xFF9AA6C0))
     "nds" -> PadLayout(
         "Nintendo DS", 0xFF22242A, 0xFFB8BCC6,
         listOf(DPAD) + face(NINTENDO) + shoulders("L", "R") + center("SELECT", "START"),
+        Body(BodyShape.HANDHELD, 0xFF3A3D45, 0xFF5B6270),
     )
     "3ds", "n3ds" -> PadLayout(
         "Nintendo 3DS", 0xFF2A1F22, 0xFFD6404B,
         listOf(Control.Stick(0, 0.15f, 0.4f, 0.14f), Control.Dpad(0.17f, 0.78f, 0.13f)) +
             face(NINTENDO) + shoulders("L", "R", "ZL", "ZR") + center("SELECT", "START", "⌂"),
+        Body(BodyShape.HANDHELD, 0xFF8E1F2A, 0xFF5B6270),
     )
     "switch" -> PadLayout(
         "Nintendo Switch", 0xFF1A1A20, 0xFFFF4554,
         sticksHigh() + face(NINTENDO) + shoulders("L", "R", "ZL", "ZR") + center("−", "+", "⌂"),
+        Body(BodyShape.JOYCONS, 0xFF00A8D6, 0xFFE8424F, 0xFF2B2B33),
     )
     "switch-2" -> PadLayout(
         "Nintendo Switch 2", 0xFF16181F, 0xFF4FA3FF,
         sticksHigh() + face(NINTENDO) + shoulders("L", "R", "ZL", "ZR") + center("−", "+", "⌂"),
+        Body(BodyShape.JOYCONS, 0xFF2E3139, 0xFF2E3139, 0xFF4FA3FF),
     )
     "wiiu" -> PadLayout(
         "Wii U", 0xFF1B2228, 0xFF1FA7D9,
         sticksHigh() + face(NINTENDO) + shoulders("L", "R", "ZL", "ZR") + center("−", "+", "⌂"),
+        Body(BodyShape.HANDHELD, 0xFFE4E6E8, 0xFF3A4652),
     )
     "ngc", "wii" -> PadLayout(
         if (platform == "ngc") "GameCube" else "Wii", 0xFF2E2655, 0xFF7E6BE0,
@@ -180,21 +204,27 @@ fun layoutFor(platform: String?): PadLayout = when (platform) {
             Control.Stick(2, 0.68f, 0.8f, 0.12f, 0xFFB89A1E),
             Control.Button(Btn.SOUTH, "A", 0.83f, 0.52f, 0.1f, 0xFF2E9D4F),
             Control.Button(Btn.WEST, "B", 0.71f, 0.62f, 0.065f, 0xFFD64545),
-            Control.Button(Btn.EAST, "X", 0.95f, 0.4f, 0.065f, 0xFF8A8A96),
+            Control.Button(Btn.EAST, "X", 0.92f, 0.42f, 0.065f, 0xFF8A8A96),
             Control.Button(Btn.NORTH, "Y", 0.8f, 0.3f, 0.065f, 0xFF8A8A96),
         ) + shoulders(null, "Z", "L", "R") + center(null, "START"),
+        Body(BodyShape.HANDLES, 0xFF4B3F8F, 0xFF3A3070),
     )
     "genesis-slash-megadrive" -> PadLayout(
-        "Mega Drive", 0xFF151515, 0xFFD32F2F,
+        "Mega Drive", 0xFF3B3B42, 0xFFD32F2F,
         listOf(
             DPAD,
             Control.Button(Btn.WEST, "A", 0.7f, 0.66f, 0.07f),
             Control.Button(Btn.SOUTH, "B", 0.81f, 0.6f, 0.07f),
             Control.Button(Btn.EAST, "C", 0.92f, 0.54f, 0.07f),
         ) + center(null, "START"),
+        Body(BodyShape.DOGBONE, 0xFF141416, 0xFF242428, 0xFF242428),
     )
-    "sms", "gamegear" -> twoButtons(if (platform == "sms") "Master System" else "Game Gear", 0xFF181818, 0xFFD32F2F, "1", "2", DARK)
-    "turbografx16--1" -> twoButtons("PC Engine", 0xFF1C1C22, 0xFFE07B1F, "II", "I", DARK)
+    "sms" -> twoButtons("Master System", 0xFF181818, 0xFFD32F2F, "1", "2", DARK,
+        body = Body(BodyShape.BRICK, 0xFF1F1F22, 0xFF151517, 0xFFD32F2F))
+    "gamegear" -> twoButtons("Game Gear", 0xFF181818, 0xFFD32F2F, "1", "2", DARK,
+        body = Body(BodyShape.HANDHELD, 0xFF1F1F22, 0xFF3A4652))
+    "turbografx16--1" -> twoButtons("PC Engine", 0xFF1C1C22, 0xFFE07B1F, "II", "I", DARK,
+        body = Body(BodyShape.BRICK, 0xFFE2E2E4, 0xFF26262A, 0xFFE07B1F))
     "saturn" -> PadLayout(
         "Saturn", 0xFF24242C, 0xFF9AA0B5,
         listOf(
@@ -206,40 +236,46 @@ fun layoutFor(platform: String?): PadLayout = when (platform) {
             Control.Button(Btn.NORTH, "Y", 0.81f, 0.4f, 0.055f),
             Control.Button(Btn.LB, "Z", 0.92f, 0.34f, 0.055f),
         ) + shoulders(null, null, "L", "R") + center(null, "START"),
+        Body(BodyShape.DOGBONE, 0xFF3A3A44, 0xFF2C2C34, 0xFF4A4A56),
     )
     "dc" -> PadLayout(
         "Dreamcast", 0xFF1F2830, 0xFFF57C00,
         sticksHigh().take(2) + face(DREAMCAST) + shoulders(null, null, "L", "R") + center(null, "START"),
+        Body(BodyShape.HANDLES, 0xFFE6E6E8, 0xFF3A4652),
     )
     "neogeoaes", "arcade" -> PadLayout(
         if (platform == "arcade") "Arcade" else "Neo Geo", 0xFF141414, 0xFFE53935,
         listOf(
             Control.Stick(0, 0.2f, 0.58f, 0.18f),
-            Control.Button(Btn.SOUTH, "A", 0.66f, 0.64f, 0.075f, 0xFFD64545),
-            Control.Button(Btn.EAST, "B", 0.78f, 0.56f, 0.075f, 0xFFE0B21F),
-            Control.Button(Btn.WEST, "C", 0.88f, 0.44f, 0.075f, 0xFF2E9D4F),
-            Control.Button(Btn.NORTH, "D", 0.95f, 0.28f, 0.075f, 0xFF2F7FE0),
+            Control.Button(Btn.SOUTH, "A", 0.64f, 0.68f, 0.075f, 0xFFD64545),
+            Control.Button(Btn.EAST, "B", 0.75f, 0.6f, 0.075f, 0xFFE0B21F),
+            Control.Button(Btn.WEST, "C", 0.84f, 0.5f, 0.075f, 0xFF2E9D4F),
+            Control.Button(Btn.NORTH, "D", 0.91f, 0.39f, 0.075f, 0xFF2F7FE0),
         ) + center("COIN", "START"),
+        Body(BodyShape.PANEL, 0xFF1A1A1D, 0xFF101012, 0xFFE53935),
     )
     "atari2600" -> PadLayout(
         "Atari 2600", 0xFF2E2118, 0xFFE0662F,
         listOf(Control.Stick(0, 0.2f, 0.58f, 0.18f), Control.Button(Btn.SOUTH, "FIRE", 0.82f, 0.58f, 0.11f, 0xFFC62828)) +
             center("SELECT", "RESET"),
+        Body(BodyShape.PANEL, 0xFF5A3A24, 0xFF1A1512, 0xFFE0662F),
     )
-    "psx" -> sony("PlayStation", home = false)
+    "psx" -> sony("PlayStation", home = false, body = 0xFFBDBDC3, panel = 0xFFA4A4AC)
     "ps2" -> sony("PlayStation 2", home = false)
     "ps3" -> sony("PlayStation 3", home = true)
     "ps4--1" -> sony("PlayStation 4", home = true, bg = 0xFF141B2B)
     "psvita" -> PadLayout(
         "PS Vita", 0xFF181C26, 0xFF8FA8F5,
         sticksLow() + face(SONY) + shoulders("L", "R") + center("SELECT", "START", "PS"),
+        Body(BodyShape.HANDHELD, 0xFF1E1F26, 0xFF3A4652),
     )
     "psp" -> PadLayout(
         "PSP", 0xFF1A1A1F, 0xFF8FA8F5,
         listOf(Control.Dpad(0.15f, 0.42f), Control.Stick(0, 0.16f, 0.82f, 0.11f)) + face(SONY) +
             shoulders("L", "R") + center("SELECT", "START", "⌂"),
+        Body(BodyShape.HANDHELD, 0xFF1E1F26, 0xFF3A4652),
     )
     "xbox" -> xboxLike("Xbox", 0xFF121A12)
-    "xbox360" -> xboxLike("Xbox 360", 0xFF15191D)
+    "xbox360" -> xboxLike("Xbox 360", 0xFF15191D, body = 0xFFE4E5E8)
     else -> xboxLike("Manette")
 }

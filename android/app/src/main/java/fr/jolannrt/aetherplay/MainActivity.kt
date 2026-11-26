@@ -27,6 +27,7 @@ import fr.jolannrt.aetherplay.net.Server
 import fr.jolannrt.aetherplay.pad.PadState
 import fr.jolannrt.aetherplay.pad.TweakStore
 import fr.jolannrt.aetherplay.pad.layoutFor
+import fr.jolannrt.aetherplay.ui.Backdrop
 import fr.jolannrt.aetherplay.ui.ConnectScreen
 import fr.jolannrt.aetherplay.ui.PadScreen
 
@@ -62,6 +63,9 @@ class MainActivity : ComponentActivity() {
         tweakStore = TweakStore(this)
         val prefs = getSharedPreferences("link", MODE_PRIVATE)
         val deviceName = "${Build.MANUFACTURER} ${Build.MODEL}".trim()
+        // Test builds only: `adb shell am start ... --es preview snes` shows a layout without AetherPlay.
+        val debuggable = applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE != 0
+        val preview = intent.getStringExtra("preview")?.takeIf { debuggable }
 
         fun connect(server: Server) {
             prefs.edit().putString("server", server.name).apply()
@@ -71,12 +75,16 @@ class MainActivity : ComponentActivity() {
         setContent {
             val servers by discovery.servers.collectAsState()
             val linkStatus by link.status.collectAsState()
-            val game by link.game.collectAsState()
+            val linkGame by link.game.collectAsState()
+            val game = preview?.let { fr.jolannrt.aetherplay.net.Game(it, "Aperçu : $it", null) } ?: linkGame
             val token by link.token.collectAsState()
             val btStatus by hid.status.collectAsState()
             val player by link.player.collectAsState()
             val wifiInput by link.wifiInput.collectAsState()
-            var showPad by remember { mutableStateOf(false) }
+            var showPad by remember { mutableStateOf(preview != null) }
+            var backdrop by remember {
+                mutableStateOf(runCatching { Backdrop.valueOf(prefs.getString("backdrop", null)!!) }.getOrDefault(Backdrop.CONTROLLER))
+            }
 
             // Remember the pairing token AetherPlay issued.
             LaunchedEffect(token, linkStatus) {
@@ -106,6 +114,8 @@ class MainActivity : ComponentActivity() {
                     layout = layout,
                     player = player,
                     wifiInput = wifiInput,
+                    backdrop = backdrop,
+                    onBackdrop = { backdrop = it; prefs.edit().putString("backdrop", it.name).apply() },
                     tweaks = tweaks,
                     onTweaks = { tweaks = it; tweakStore.save(layout, it) },
                     game = game,

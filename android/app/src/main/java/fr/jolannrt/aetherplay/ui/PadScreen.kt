@@ -20,6 +20,8 @@ import androidx.compose.material.icons.filled.BluetoothDisabled
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.filled.SportsEsports
 import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.material.icons.filled.WifiOff
 import androidx.compose.material3.Icon
@@ -63,6 +65,9 @@ import kotlin.math.hypot
 import kotlin.math.max
 import kotlin.math.min
 
+/** What is drawn behind the buttons. */
+enum class Backdrop { CONTROLLER, COVER }
+
 @Composable
 fun PadScreen(
     layout: PadLayout,
@@ -77,6 +82,8 @@ fun PadScreen(
     wifiInput: Boolean = true,
     tweaks: Map<Int, Tweak> = emptyMap(),
     onTweaks: (Map<Int, Tweak>) -> Unit = {},
+    backdrop: Backdrop = Backdrop.CONTROLLER,
+    onBackdrop: (Backdrop) -> Unit = {},
 ) {
     val accent = Color(layout.accent)
     var editing by remember { mutableStateOf(false) }
@@ -86,13 +93,16 @@ fun PadScreen(
             .fillMaxSize()
             .background(Color(layout.background)),
     ) {
-        game?.cover?.let {
-            Image(
-                it.asImageBitmap(), null,
-                Modifier.fillMaxSize(),
-                contentScale = ContentScale.Crop,
-                alpha = 0.18f,
-            )
+        when (backdrop) {
+            Backdrop.CONTROLLER -> Canvas(Modifier.fillMaxSize()) { drawBody(layout.body) }
+            Backdrop.COVER -> game?.cover?.let {
+                Image(
+                    it.asImageBitmap(), null,
+                    Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop,
+                    alpha = 0.3f,
+                )
+            }
         }
         if (editing) {
             EditPad(layout, tweaks, selected, { selected = it }, onTweaks)
@@ -105,7 +115,7 @@ fun PadScreen(
                 .padding(horizontal = 8.dp, vertical = 2.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Spacer(Modifier.width(260.dp))
+            Spacer(Modifier.width(235.dp))
             if (player > 0) {
                 Text(
                     "J$player",
@@ -131,16 +141,24 @@ fun PadScreen(
             Icon(if (wifi) Icons.Filled.Wifi else Icons.Filled.WifiOff, "Wi-Fi",
                 tint = if (wifi) accent else Color.White.copy(alpha = 0.35f), modifier = Modifier.padding(start = 6.dp))
             if (game != null) {
-                TextButton(onClick = onQuitGame) {
-                    Icon(Icons.Filled.Close, null, tint = Color.White)
-                    Text("Quitter le jeu", color = Color.White, fontSize = 13.sp)
+                IconButton(onClick = onQuitGame) {
+                    Icon(Icons.Filled.Close, "Quitter le jeu", tint = Color(0xFFFF6B6B))
                 }
+            }
+            IconButton(onClick = {
+                onBackdrop(if (backdrop == Backdrop.CONTROLLER) Backdrop.COVER else Backdrop.CONTROLLER)
+            }) {
+                Icon(
+                    if (backdrop == Backdrop.CONTROLLER) Icons.Filled.Image else Icons.Filled.SportsEsports,
+                    if (backdrop == Backdrop.CONTROLLER) "Fond : jaquette" else "Fond : manette",
+                    tint = Color.White,
+                )
             }
             IconButton(onClick = { editing = !editing; selected = null }) {
                 Icon(Icons.Filled.Tune, "Personnaliser", tint = if (editing) accent else Color.White)
             }
             IconButton(onClick = onSettings) { Icon(Icons.Filled.Settings, "Connexion", tint = Color.White) }
-            Spacer(Modifier.width(260.dp))
+            Spacer(Modifier.width(235.dp))
         }
         if (!editing && game != null && !bluetooth && !wifiInput) {
             Text(
