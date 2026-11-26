@@ -6,6 +6,13 @@ Stack : **Tauri 2** (backend Rust). AetherPlay implémente `window.rommNative`, 
 
 Licence : **AGPL-3.0** (comme RomM, dont l'interface est reprise).
 
+## Télécharger
+
+- **Windows** : [AetherPlay-Windows.msi](https://github.com/Furtif2005Sno/AetherPlay/releases/latest/download/AetherPlay-Windows.msi)
+- **Mac** (Apple Silicon) : [AetherPlay-Mac.dmg](https://github.com/Furtif2005Sno/AetherPlay/releases/latest/download/AetherPlay-Mac.dmg)
+
+Ces liens donnent toujours la dernière version.
+
 ## Développement
 
 ```sh

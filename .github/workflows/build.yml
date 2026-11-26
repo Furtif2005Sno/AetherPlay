@@ -83,10 +83,14 @@ jobs:
       - env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ github.ref_name }}
+        # Fixed names keep the .../releases/latest/download/<name> links stable
+        # across versions, so a direct download link never has to change.
         run: |
+          mv installers/*.msi installers/AetherPlay-Windows.msi
+          mv installers/*.dmg installers/AetherPlay-Mac.dmg
           gh release delete "$TAG" --repo "$GITHUB_REPOSITORY" --yes || true
-          gh release create "$TAG" installers/*.msi installers/*.dmg \
+          gh release create "$TAG" installers/AetherPlay-Windows.msi installers/AetherPlay-Mac.dmg \
             --repo "$GITHUB_REPOSITORY" \
             --verify-tag \
             --title "AetherPlay $TAG" \
-            --notes "Installeurs Windows (.msi) et macOS Apple Silicon (.dmg). Sur Mac, voir le README pour le premier lancement (app non notarisée)."
+            --notes "**Windows** : télécharger AetherPlay-Windows.msi puis double-cliquer dessus. **Mac** (Apple Silicon) : télécharger AetherPlay-Mac.dmg, glisser AetherPlay dans Applications ; au premier lancement, Réglages Système > Confidentialité et sécurité > Ouvrir quand même."
