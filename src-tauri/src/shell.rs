@@ -50,10 +50,10 @@ fn cookie_value(cookies: &str, name: &str) -> Option<String> {
 
 /// Appends one line to proxy.log in the app's log folder (no secrets: method,
 /// path, status and which authentication was used).
-fn log(app: &AppHandle, line: &str) {
+pub fn log(app: &AppHandle, line: &str) {
     let Ok(dir) = app.path().app_log_dir() else { return };
     let _ = std::fs::create_dir_all(&dir);
-    let file = dir.join("proxy.log");
+    let file = dir.join("aetherplay.log");
     if std::fs::metadata(&file).is_ok_and(|m| m.len() > 1 << 20) {
         let _ = std::fs::remove_file(&file);
     }

@@ -190,6 +190,7 @@ pub fn command(
     platform: &str,
     rom: &Path,
     fullscreen: bool,
+    save_dir: Option<&Path>,
 ) -> Result<tokio::process::Command, String> {
     let exe = executable(path)?;
     let core = match emu.cores.get(platform) {
@@ -203,11 +204,18 @@ pub fn command(
         None => String::new(),
     };
     let rom = rom.to_string_lossy();
+    // `{saves}` pins the emulator's save folder to the one the sync watches.
+    let saves = save_dir.map(|d| {
+        let _ = std::fs::create_dir_all(d);
+        d.to_string_lossy().into_owned()
+    });
     let mut cmd = tokio::process::Command::new(&exe);
     if fullscreen {
         cmd.args(&emu.fullscreen_args);
     }
-    cmd.args(emu.args.iter().map(|a| a.replace("{rom}", &rom).replace("{core}", &core)));
+    cmd.args(emu.args.iter().map(|a| {
+        a.replace("{rom}", &rom).replace("{core}", &core).replace("{saves}", saves.as_deref().unwrap_or("."))
+    }));
     if let Some(dir) = exe.parent() {
         cmd.current_dir(dir);
     }

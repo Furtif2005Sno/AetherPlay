@@ -78,23 +78,33 @@ fn write_if_newer(target: &Path, data: &[u8], remote: SystemTime) -> Result<bool
 }
 
 /// Downloads the latest RomM save for this game/emulator and puts it in place.
+///
+/// single_file_as: for emulators keeping one save file per game named after
+/// the ROM (RetroArch: <rom stem>.srm), any raw save RomM holds for the game
+/// (e.g. from its web player) is accepted too, and written under that name.
+/// Returns a one-line description of what happened, for the diagnostic log.
 pub async fn restore(
     client: &Client,
     rom: &Rom,
     emu: &str,
     dirs: &[PathBuf],
+    single_file_as: Option<&str>,
     index: &mut Index,
-) -> Result<(), String> {
-    let latest = client
-        .saves(rom.id)
-        .await?
+) -> Result<String, String> {
+    let saves = client.saves(rom.id).await?;
+    let total = saves.len();
+    let ours = |s: &crate::romm::Save| s.emulator.as_deref() == Some(emu) && s.slot.as_deref() == Some(SLOT);
+    let latest = saves
         .into_iter()
-        .filter(|s| s.emulator.as_deref() == Some(emu) && s.slot.as_deref() == Some(SLOT))
+        .filter(|s| ours(s) || (single_file_as.is_some() && !s.file_name.starts_with(ZIP_PREFIX)))
         .max_by_key(|s| s.updated_at);
-    let Some(save) = latest else { return Ok(()) };
+    let Some(save) = latest else {
+        return Ok(format!("aucune sauvegarde utilisable sur RomM ({total} pour ce jeu)"));
+    };
     let data = client.save_content(save.id).await?;
     let remote: SystemTime = save.updated_at.into();
     let mut keys = Vec::new();
+    let mut written = 0;
 
     if save.file_name.starts_with(ZIP_PREFIX) && save.file_name.ends_with(".zip") {
         let mut archive = zip::ZipArchive::new(Cursor::new(data)).map_err(err)?;
@@ -107,22 +117,31 @@ pub async fn restore(
             let Some(target) = resolve(dirs, &key) else { continue };
             let mut buf = Vec::with_capacity(file.size() as usize);
             file.read_to_end(&mut buf).map_err(err)?;
-            write_if_newer(&target, &buf, remote)?;
+            written += usize::from(write_if_newer(&target, &buf, remote)?);
             keys.push(key);
         }
     } else {
-        let name = Path::new(&save.file_name)
-            .file_name()
-            .and_then(|n| n.to_str())
-            .ok_or("Nom de sauvegarde invalide")?;
+        let name = match single_file_as {
+            Some(name) => name.to_string(),
+            None => Path::new(&save.file_name)
+                .file_name()
+                .and_then(|n| n.to_str())
+                .ok_or("Nom de sauvegarde invalide")?
+                .to_string(),
+        };
         let key = format!("0/{name}");
         if let Some(target) = resolve(dirs, &key) {
-            write_if_newer(&target, &data, remote)?;
+            written += usize::from(write_if_newer(&target, &data, remote)?);
             keys.push(key);
         }
     }
     index.entry(rom.id, emu).extend(keys);
-    index.save()
+    index.save()?;
+    Ok(if written > 0 {
+        format!("« {} » ({}) restaurée : {written} fichier(s)", save.file_name, save.emulator.unwrap_or_default())
+    } else {
+        format!("« {} » plus ancienne que la copie locale : gardée telle quelle", save.file_name)
+    })
 }
 
 /// Files under `dirs` modified since `since`, as index keys.

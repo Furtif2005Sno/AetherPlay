@@ -263,9 +263,9 @@ onUnmounted(() => unlisten?.());
     <SettingsSection title="Diagnostic" icon="mdi-file-document-outline">
       <div class="aep-row">
         <div class="aep-row__info">
-          <div class="aep-row__title">Journal de connexion</div>
+          <div class="aep-row__title">Journal de diagnostic</div>
           <div class="aep-muted">
-            Étapes de connexion au serveur (sans mot de passe), utile si la connexion ne marche pas.
+            Connexion au serveur, lancements et synchronisation des sauvegardes (sans mot de passe). À envoyer en cas de problème.
           </div>
         </div>
         <RBtn size="small" variant="outlined" @click="openLog">Afficher le fichier</RBtn>

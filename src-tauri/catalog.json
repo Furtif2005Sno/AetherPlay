@@ -34,7 +34,7 @@
   { "id": "xenia", "name": "Xenia", "fullscreen_args": ["--fullscreen=true"], "platforms": ["xbox360"], "args": ["{rom}"], "os": ["windows"], "experimental": true,
     "saves": { "windows": ["{exe_dir}/content"] } },
   {
-    "id": "retroarch", "name": "RetroArch", "fullscreen_args": ["-f"], "args": ["-L", "{core}", "{rom}"], "os": ["windows", "macos"],
+    "id": "retroarch", "name": "RetroArch", "fullscreen_args": ["-f"], "args": ["-L", "{core}", "-s", "{saves}", "{rom}"], "os": ["windows", "macos"],
     "saves": { "windows": ["{exe_dir}/saves"], "macos": ["{home}/Library/Application Support/RetroArch/saves"] },
     "platforms": ["nes", "snes", "n64", "gb", "gbc", "gba", "genesis-slash-megadrive", "sms", "gamegear", "turbografx16--1", "neogeoaes", "arcade", "atari2600", "saturn", "psx", "nds", "psp", "dc"],
     "cores": {

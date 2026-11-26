@@ -28,7 +28,8 @@ pub struct Rom {
     pub path_cover_small: Option<String>,
     #[serde(default)]
     pub path_cover_large: Option<String>,
-    #[serde(default)]
+    /// RomM 5 names it `has_multiple_files`; older versions `multi`.
+    #[serde(default, alias = "has_multiple_files")]
     pub multi: bool,
 }
 

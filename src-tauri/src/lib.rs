@@ -201,6 +201,7 @@ struct LaunchResult {
 /// emulator; uploads the save once it exits. Progress goes out as `launch-state`.
 async fn launch(app: AppHandle, rom_id: u64, fullscreen: bool) -> Result<LaunchResult, LaunchError> {
     let fail = |code: &'static str, message: String| {
+        shell::log(&app, &format!("launch rom={rom_id}: échec {code} : {message}"));
         launch_state(&app, rom_id, json!({ "status": "failed", "error": { "code": code, "message": message } }));
         LaunchError { code, message }
     };
@@ -253,14 +254,25 @@ async fn launch(app: AppHandle, rom_id: u64, fullscreen: bool) -> Result<LaunchR
             .map_err(|e| fail("launch-failed", format!("Configuration des mises à jour/DLC : {e}")))?;
     }
     let save_dirs = emu.save_dirs(exe, Some(&target), &vars, &cfg.save_dirs);
+    shell::log(&app, &format!("launch rom={rom_id} ({}) : {} via {}, saves {:?}", rom.fs_name, rom.platform_slug, emu.name, save_dirs));
     let data_dir = app.path().app_local_data_dir().map_err(|e| fail("launch-failed", e.to_string()))?;
     let mut index = saves::Index::load(data_dir.join("saves-index.json"));
     if !save_dirs.is_empty() {
         launch_state(&app, rom_id, json!({ "status": "downloading", "stage": "save" }));
         // A failed restore must not block playing; the page is told.
-        let action = match saves::restore(&client, &rom, &emu.id, &save_dirs, &mut index).await {
-            Ok(()) => json!({ "action": "downloaded", "slot": saves::SLOT }),
-            Err(e) => json!({ "action": "failed", "slot": saves::SLOT, "detail": e }),
+        // RetroArch keeps one <rom stem>.srm per game: RomM's other saves fit.
+        let single_file_as = (!emu.cores.is_empty())
+            .then(|| target.file_stem().map(|s| format!("{}.srm", s.to_string_lossy())))
+            .flatten();
+        let action = match saves::restore(&client, &rom, &emu.id, &save_dirs, single_file_as.as_deref(), &mut index).await {
+            Ok(what) => {
+                shell::log(&app, &format!("sync rom={rom_id}: restauration : {what}"));
+                json!({ "action": "downloaded", "slot": saves::SLOT })
+            }
+            Err(e) => {
+                shell::log(&app, &format!("sync rom={rom_id}: restauration échouée : {e}"));
+                json!({ "action": "failed", "slot": saves::SLOT, "detail": e })
+            }
         };
         launch_state(&app, rom_id, json!({ "status": "sync", "sync": action }));
     }
@@ -272,7 +284,7 @@ async fn launch(app: AppHandle, rom_id: u64, fullscreen: bool) -> Result<LaunchR
     }
 
     let started = std::time::SystemTime::now();
-    let mut child = emulators::command(emu, exe, &rom.platform_slug, &target, fullscreen || cfg.fullscreen)
+    let mut child = emulators::command(emu, exe, &rom.platform_slug, &target, fullscreen || cfg.fullscreen, save_dirs.first().map(PathBuf::as_path))
         .and_then(|mut c| c.spawn().map_err(|e| format!("Impossible de lancer {} : {e}", emu.name)))
         .map_err(|e| fail("launch-failed", e))?;
     gamepad::set_running(child.id());
@@ -292,9 +304,19 @@ async fn launch(app: AppHandle, rom_id: u64, fullscreen: bool) -> Result<LaunchR
         }
         let core = emu.core(&rom.platform_slug);
         let action = match saves::upload(&client, &rom, &emu.id, core, &save_dirs, &dest, started, &mut index).await {
-            Ok(true) => Some(json!({ "action": "uploaded", "slot": saves::SLOT })),
-            Ok(false) => None,
-            Err(e) => Some(json!({ "action": "failed", "slot": saves::SLOT, "detail": e })),
+            Ok(true) => {
+                shell::log(&app2, &format!("sync rom={rom_id}: sauvegarde envoyée sur RomM"));
+                Some(json!({ "action": "uploaded", "slot": saves::SLOT }))
+            }
+            Ok(false) => {
+                let dirs: Vec<String> = save_dirs.iter().map(|d| d.display().to_string()).collect();
+                shell::log(&app2, &format!("sync rom={rom_id}: aucun fichier modifié pendant la partie dans {dirs:?}"));
+                None
+            }
+            Err(e) => {
+                shell::log(&app2, &format!("sync rom={rom_id}: envoi échoué : {e}"));
+                Some(json!({ "action": "failed", "slot": saves::SLOT, "detail": e }))
+            }
         };
         if let Some(sync) = action {
             launch_state(&app2, rom_id, json!({ "status": "sync", "sync": sync }));
@@ -387,10 +409,10 @@ async fn import_save(app: AppHandle, id: String, path: String) -> Result<import:
         .map_err(|e| e.to_string())?
 }
 
-/// Shows the diagnostic log (proxy.log) in the file manager.
+/// Shows the diagnostic log (aetherplay.log) in the file manager.
 #[tauri::command]
 fn open_log(app: AppHandle) -> Result<(), String> {
-    let file = app.path().app_log_dir().map_err(|e| e.to_string())?.join("proxy.log");
+    let file = app.path().app_log_dir().map_err(|e| e.to_string())?.join("aetherplay.log");
     if !file.exists() {
         return Err("Le journal est vide pour l'instant.".into());
     }
