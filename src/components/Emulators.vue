@@ -2,13 +2,22 @@
 import { onMounted, ref } from "vue";
 import { open } from "@tauri-apps/plugin-dialog";
 import { api, type Emulator } from "../api";
+import { install, installable, installLabel, installs } from "../installer";
 
 const props = defineProps<{ paths: Record<string, string> }>();
 const emit = defineEmits<{ changed: [] }>();
 const list = ref<Emulator[]>([]);
 const isMac = navigator.userAgent.includes("Mac");
 
-onMounted(async () => (list.value = await api.catalog()));
+const canInstall = ref<string[]>([]);
+
+onMounted(async () => {
+  [list.value, canInstall.value] = await Promise.all([api.catalog(), installable()]);
+});
+
+async function doInstall(emu: Emulator) {
+  if (await install(emu.id)) emit("changed");
+}
 
 async function pick(emu: Emulator) {
   // On macOS the user picks the .app bundle (a directory).
@@ -28,7 +37,7 @@ async function clear(emu: Emulator) {
 <template>
   <div class="page">
     <h2>Émulateurs</h2>
-    <p class="muted">Indique où se trouve chaque émulateur installé. L'installation automatique arrive bientôt.</p>
+    <p class="muted">Installe un émulateur en un clic, ou indique où se trouve une version déjà installée.</p>
     <div v-for="emu in list" :key="emu.id" class="row panel">
       <div class="info">
         <strong>{{ emu.name }}</strong>
@@ -38,6 +47,17 @@ async function clear(emu: Emulator) {
           {{ props.paths[emu.id] || "Non configuré" }}
         </div>
       </div>
+      <span class="small" :class="{ error: typeof installs[emu.id] === 'object' }" :title="typeof installs[emu.id] === 'object' ? (installs[emu.id] as any).error : ''">
+        {{ installLabel(installs[emu.id]) }}
+      </span>
+      <button
+        v-if="canInstall.includes(emu.id)"
+        class="btn primary"
+        :disabled="typeof installs[emu.id] === 'number'"
+        @click="doInstall(emu)"
+      >
+        {{ props.paths[emu.id] ? "Réinstaller" : "Installer" }}
+      </button>
       <button class="btn" @click="pick(emu)">Choisir…</button>
       <button v-if="props.paths[emu.id]" class="btn" @click="clear(emu)">Retirer</button>
     </div>

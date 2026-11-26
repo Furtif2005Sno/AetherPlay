@@ -58,6 +58,12 @@ impl Emulator {
     pub fn core(&self, platform: &str) -> Option<&str> {
         self.cores.get(platform).map(String::as_str)
     }
+
+    /// Expected location of the libretro core for `platform`, if one is needed.
+    pub fn core_file(&self, exe_path: &str, platform: &str) -> Option<PathBuf> {
+        let core = self.cores.get(platform)?;
+        Some(core_path(&executable(exe_path).ok()?, core))
+    }
 }
 
 pub const CURRENT_OS: &str = if cfg!(target_os = "macos") { "macos" } else { "windows" };

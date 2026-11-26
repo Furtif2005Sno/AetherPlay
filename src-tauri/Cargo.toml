@@ -24,6 +24,8 @@ futures-util = "0.3"
 keyring = { version = "3", features = ["windows-native", "apple-native"] }
 zip = { version = "9.8.2", default-features = false, features = ["deflate"] }
 chrono = { version = "0.4.45", default-features = false, features = ["serde", "std", "clock"] }
+regex = "1.13.2"
+sevenz-rust2 = "0.27.0"
 
 [profile.release]
 codegen-units = 1

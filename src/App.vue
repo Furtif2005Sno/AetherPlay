@@ -4,10 +4,18 @@ import { api, type Settings } from "./api";
 import Login from "./components/Login.vue";
 import Library from "./components/Library.vue";
 import Emulators from "./components/Emulators.vue";
+import Setup from "./components/Setup.vue";
 
 const settings = ref<Settings | null>(null);
 const view = ref<"library" | "emulators">("library");
 const editingServer = ref(false);
+const setupDone = ref(localStorage.getItem("setupDone") === "1");
+
+async function finishSetup() {
+  localStorage.setItem("setupDone", "1");
+  setupDone.value = true;
+  await refresh();
+}
 
 async function refresh() {
   settings.value = await api.settings();
@@ -33,7 +41,8 @@ onMounted(refresh);
         <button class="btn" :title="settings.server_url" @click="editingServer = true">{{ settings.username }}</button>
       </nav>
       <div class="content">
-        <Library v-if="view === 'library'" />
+        <Setup v-if="!setupDone" @done="finishSetup" />
+        <Library v-else-if="view === 'library'" />
         <Emulators v-else :paths="settings.emulator_paths" @changed="refresh" />
       </div>
     </div>

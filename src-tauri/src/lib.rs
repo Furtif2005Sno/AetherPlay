@@ -1,5 +1,6 @@
 mod config;
 mod emulators;
+mod install;
 mod romm;
 mod saves;
 
@@ -70,6 +71,34 @@ fn set_emulator_path(app: AppHandle, id: String, path: Option<String>) -> Result
     config::save(&app, &cfg)
 }
 
+#[tauri::command]
+fn installable() -> Vec<String> {
+    install::installable()
+}
+
+#[derive(Serialize, Clone)]
+struct InstallProgress {
+    id: String,
+    done: u64,
+    total: u64,
+}
+
+/// Downloads and installs an emulator, then registers its path.
+#[tauri::command]
+async fn install_emulator(app: AppHandle, id: String) -> Result<String, String> {
+    let root = app.path().app_local_data_dir().map_err(|e| e.to_string())?.join("emulators");
+    tokio::fs::create_dir_all(&root).await.map_err(|e| e.to_string())?;
+    let path = install::install(&id, &root, |done, total| {
+        let _ = app.emit("install-progress", InstallProgress { id: id.clone(), done, total });
+    })
+    .await?;
+    let path = path.to_string_lossy().into_owned();
+    let mut cfg = config::load(&app);
+    cfg.emulator_paths.insert(id, path.clone());
+    config::save(&app, &cfg)?;
+    Ok(path)
+}
+
 fn rom_path(app: &AppHandle, rom: &romm::Rom) -> Result<PathBuf, String> {
     let dir = app.path().app_local_data_dir().map_err(|e| e.to_string())?;
     Ok(dir.join("roms").join(&rom.platform_slug).join(&rom.fs_name))
@@ -124,6 +153,10 @@ async fn play(app: AppHandle, rom_id: u64) -> Result<(), String> {
             // A failed restore must not block playing; the user is told.
             Err(e) => sync_event(&app, rom_id, "error", Some(format!("Restauration de la sauvegarde : {e}"))),
         }
+    }
+
+    if let Some(core) = emu.core_file(exe, &rom.platform_slug) {
+        install::ensure_core(&core).await?;
     }
 
     let started = std::time::SystemTime::now();
@@ -195,6 +228,8 @@ pub fn run() {
             roms,
             catalog,
             set_emulator_path,
+            installable,
+            install_emulator,
             play
         ])
         .run(tauri::generate_context!())
