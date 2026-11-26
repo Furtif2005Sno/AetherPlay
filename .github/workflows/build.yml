@@ -61,6 +61,11 @@ jobs:
 
       - run: npm run tauri build -- --bundles ${{ matrix.bundles }}
 
+      # An unsigned bundle is reported as "damaged" by Gatekeeper; make sure the
+      # ad-hoc signature (bundle.macOS.signingIdentity "-") sealed the whole app.
+      - if: runner.os == 'macOS'
+        run: codesign --verify --deep --strict --verbose=2 src-tauri/target/release/bundle/macos/*.app
+
       - uses: actions/upload-artifact@v4
         with:
           name: aetherplay-${{ matrix.name }}
