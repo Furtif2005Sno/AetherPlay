@@ -1,0 +1,19 @@
+{
+  "clear": "Pulisci",
+  "click-to-copy": "Clicca per copiare negli appunti",
+  "copied": "Log copiati negli appunti",
+  "copy": "Copia negli appunti",
+  "download": "Scarica",
+  "empty": "Nessun log presente",
+  "jump-to-latest": "Salta all'ultimo",
+  "level-all": "Tutti i livelli",
+  "level-filter": "Filtra per livello",
+  "line-copied": "Riga copiata negli appunti",
+  "load-error": "Caricamento log fallito",
+  "module-all": "Tutti i moduli",
+  "module-filter": "Filtra per modulo",
+  "no-matches": "Nessun log corrisponde ai tuoi filtri",
+  "pause": "Pausa",
+  "resume": "Riprendi",
+  "search-placeholder": "Cerca log"
+}

@@ -1,7 +1,8 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Capability for the main window",
-  "windows": ["main"],
+  "description": "AetherPlay windows, including the bundled RomM interface served on the romm scheme",
+  "windows": ["main", "settings"],
+  "remote": { "urls": ["http://romm.localhost/*", "romm://localhost/*"] },
   "permissions": ["core:default", "opener:default", "dialog:allow-open"]
 }

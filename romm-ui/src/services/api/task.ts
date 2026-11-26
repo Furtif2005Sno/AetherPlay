@@ -1,0 +1,29 @@
+import {
+  type GroupedTasksDict,
+  type TaskExecutionResponse,
+} from "@/__generated__";
+import api from "@/services/api";
+import type { TaskStatusResponse } from "@/utils/tasks";
+
+async function getTasks() {
+  return api.get<GroupedTasksDict>("/tasks");
+}
+
+async function getTaskById(taskId: string) {
+  return api.get<TaskStatusResponse>(`/tasks/${taskId}`);
+}
+
+async function runTask(taskName: string, body?: Record<string, unknown>) {
+  return api.post<TaskExecutionResponse>(`/tasks/run/${taskName}`, body);
+}
+
+async function getTaskStatus() {
+  return api.get<TaskStatusResponse[]>("/tasks/status");
+}
+
+export default {
+  getTasks,
+  getTaskById,
+  runTask,
+  getTaskStatus,
+};

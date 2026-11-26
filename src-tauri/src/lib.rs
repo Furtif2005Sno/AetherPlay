@@ -5,10 +5,12 @@ mod install;
 mod romm;
 mod roms;
 mod saves;
+mod shell;
 
 use serde::Serialize;
+use serde_json::{json, Value};
 use std::{collections::HashMap, path::PathBuf};
-use tauri::{AppHandle, Emitter, Manager, http};
+use tauri::{AppHandle, Emitter, Manager};
 
 fn client(app: &AppHandle) -> Result<romm::Client, String> {
     let cfg = config::load(app);
@@ -23,7 +25,7 @@ fn client(app: &AppHandle) -> Result<romm::Client, String> {
 struct Settings {
     server_url: String,
     username: String,
-    logged_in: bool,
+    configured: bool,
     emulator_paths: HashMap<String, String>,
     platform_emulators: HashMap<String, String>,
     save_dirs: HashMap<String, String>,
@@ -33,7 +35,7 @@ struct Settings {
 fn get_settings(app: AppHandle) -> Settings {
     let cfg = config::load(&app);
     Settings {
-        logged_in: !cfg.server_url.is_empty() && config::get_password(&cfg.username).is_some(),
+        configured: !cfg.server_url.is_empty(),
         server_url: cfg.server_url,
         username: cfg.username,
         emulator_paths: cfg.emulator_paths,
@@ -42,24 +44,18 @@ fn get_settings(app: AppHandle) -> Settings {
     }
 }
 
+/// Saves the RomM server address after checking it answers. Logging in then
+/// happens in RomM's own form, which the proxy remembers.
 #[tauri::command]
-async fn login(app: AppHandle, server_url: String, username: String, password: String) -> Result<(), String> {
-    romm::Client::new(&server_url, &username, &password)?.check_auth().await?;
-    config::set_password(&username, &password)?;
+async fn set_server(app: AppHandle, server_url: String) -> Result<(), String> {
+    let url = server_url.trim().trim_end_matches('/').to_string();
+    let res = reqwest::get(format!("{url}/api/heartbeat")).await.map_err(|e| format!("Serveur injoignable : {e}"))?;
+    if !res.status().is_success() {
+        return Err(format!("Ce n'est pas un serveur RomM ({})", res.status()));
+    }
     let mut cfg = config::load(&app);
-    cfg.server_url = server_url.trim().trim_end_matches('/').to_string();
-    cfg.username = username;
+    cfg.server_url = url;
     config::save(&app, &cfg)
-}
-
-#[tauri::command]
-async fn platforms(app: AppHandle) -> Result<Vec<romm::Platform>, String> {
-    client(&app)?.platforms().await
-}
-
-#[tauri::command]
-async fn roms(app: AppHandle, platform_id: u64) -> Result<Vec<romm::Rom>, String> {
-    client(&app)?.roms(platform_id).await
 }
 
 #[tauri::command]
@@ -159,35 +155,57 @@ async fn install_emulator(app: AppHandle, id: String) -> Result<String, String> 
     Ok(path)
 }
 
+
 fn rom_path(app: &AppHandle, rom: &romm::Rom) -> Result<PathBuf, String> {
     let dir = app.path().app_local_data_dir().map_err(|e| e.to_string())?;
     Ok(dir.join("roms").join(&rom.platform_slug).join(&rom.fs_name))
 }
 
-#[derive(Serialize, Clone)]
-struct Progress {
-    rom_id: u64,
-    done: u64,
-    total: u64,
+fn path_vars(app: &AppHandle) -> Result<emulators::PathVars, String> {
+    let p = app.path();
+    let e = |e: tauri::Error| e.to_string();
+    Ok(emulators::PathVars {
+        home: p.home_dir().map_err(e)?,
+        documents: p.document_dir().map_err(e)?,
+        appdata: p.data_dir().map_err(e)?,
+    })
 }
 
-#[derive(Serialize, Clone)]
-struct Exited {
-    rom_id: u64,
-    code: Option<i32>,
+/// Emits a `LaunchState` (RomM desktop bridge contract) for `rom_id`.
+fn launch_state(app: &AppHandle, rom_id: u64, mut state: Value) {
+    state["romId"] = json!(rom_id);
+    let _ = app.emit("launch-state", state);
 }
 
-/// Downloads the ROM if needed, then starts the matching emulator.
-#[tauri::command]
-async fn play(app: AppHandle, rom_id: u64) -> Result<(), String> {
-    let client = client(&app)?;
-    let rom = client.rom(rom_id).await?;
+/// Rejection of `rommNative.launch`: `{ code, message }` as the contract names them.
+#[derive(Serialize)]
+struct LaunchError {
+    code: &'static str,
+    message: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LaunchResult {
+    rom_id: u64,
+    emulator: String,
+}
+
+/// Downloads the ROM if needed, restores its save, then starts the matching
+/// emulator; uploads the save once it exits. Progress goes out as `launch-state`.
+async fn launch(app: AppHandle, rom_id: u64) -> Result<LaunchResult, LaunchError> {
+    let fail = |code: &'static str, message: String| {
+        launch_state(&app, rom_id, json!({ "status": "failed", "error": { "code": code, "message": message } }));
+        LaunchError { code, message }
+    };
+    let client = client(&app).map_err(|e| fail("session-expired", e))?;
+    let rom = client.rom(rom_id).await.map_err(|e| fail("invalid-request", e))?;
     let cfg = config::load(&app);
     let (emu, exe) = emulators::resolve(&rom.platform_slug, &cfg.emulator_paths, &cfg.platform_emulators)
-        .ok_or_else(|| format!("Aucun émulateur configuré pour « {} »", rom.platform_slug))?;
+        .ok_or_else(|| fail("no-emulator-configured", format!("Aucun émulateur configuré pour « {} »", rom.platform_slug)))?;
 
     // The ROM file, or for multi-file ROMs the folder they are extracted into.
-    let dest = rom_path(&app, &rom)?;
+    let dest = rom_path(&app, &rom).map_err(|e| fail("download-failed", e))?;
     let cached = if rom.multi {
         dest.join(roms::MARKER).exists()
     } else {
@@ -203,80 +221,117 @@ async fn play(app: AppHandle, rom_id: u64) -> Result<(), String> {
                 // Throttle events to roughly every 1 MiB.
                 if done - last >= 1 << 20 || done == total {
                     last = done;
-                    let _ = app.emit("download-progress", Progress { rom_id, done, total });
+                    let progress = if total > 0 { done as f64 / total as f64 } else { 0.0 };
+                    launch_state(&app, rom_id, json!({ "status": "downloading", "stage": "rom",
+                        "progress": progress, "received": done, "total": total }));
                 }
             })
-            .await?;
+            .await
+            .map_err(|e| fail("download-failed", e))?;
         if rom.multi {
             let (zip, dir) = (download_to.clone(), dest.clone());
             let res = tauri::async_runtime::spawn_blocking(move || roms::extract(&zip, &dir)).await;
             let _ = std::fs::remove_file(&download_to);
-            res.map_err(|e| e.to_string())?.map_err(|e| format!("Extraction de la ROM : {e}"))?;
+            res.map_err(|e| e.to_string())
+                .and_then(|r| r)
+                .map_err(|e| fail("download-failed", format!("Extraction de la ROM : {e}")))?;
         }
     }
-    let target = if rom.multi { roms::launch_target(&dest, &rom.fs_name)? } else { dest.clone() };
+    let target = if rom.multi { roms::launch_target(&dest, &rom.fs_name) } else { Ok(dest.clone()) }
+        .map_err(|e| fail("launch-failed", e))?;
 
-    let vars = path_vars(&app)?;
+    let vars = path_vars(&app).map_err(|e| fail("launch-failed", e))?;
     // Switch: let Eden/Eglantine pick up updates/DLC shipped next to the base game.
     if rom.multi && let Some(ini) = emu.config_ini(exe, &vars) {
         emulators::register_external_content(&ini, &dest)
-            .map_err(|e| format!("Configuration des mises à jour/DLC : {e}"))?;
+            .map_err(|e| fail("launch-failed", format!("Configuration des mises à jour/DLC : {e}")))?;
     }
     let save_dirs = emu.save_dirs(exe, Some(&target), &vars, &cfg.save_dirs);
-    let mut index = saves::Index::load(app.path().app_local_data_dir().map_err(|e| e.to_string())?.join("saves-index.json"));
+    let data_dir = app.path().app_local_data_dir().map_err(|e| fail("launch-failed", e.to_string()))?;
+    let mut index = saves::Index::load(data_dir.join("saves-index.json"));
     if !save_dirs.is_empty() {
-        sync_event(&app, rom_id, "restoring", None);
-        match saves::restore(&client, &rom, &emu.id, &save_dirs, &mut index).await {
-            Ok(()) => sync_event(&app, rom_id, "restored", None),
-            // A failed restore must not block playing; the user is told.
-            Err(e) => sync_event(&app, rom_id, "error", Some(format!("Restauration de la sauvegarde : {e}"))),
-        }
+        launch_state(&app, rom_id, json!({ "status": "downloading", "stage": "save" }));
+        // A failed restore must not block playing; the page is told.
+        let action = match saves::restore(&client, &rom, &emu.id, &save_dirs, &mut index).await {
+            Ok(()) => json!({ "action": "downloaded", "slot": saves::SLOT }),
+            Err(e) => json!({ "action": "failed", "slot": saves::SLOT, "detail": e }),
+        };
+        launch_state(&app, rom_id, json!({ "status": "sync", "sync": action }));
     }
 
     if let Some(core) = emu.core_file(exe, &rom.platform_slug) {
-        install::ensure_core(&core).await?;
+        let name = core.file_stem().map(|s| s.to_string_lossy().into_owned());
+        launch_state(&app, rom_id, json!({ "status": "downloading", "stage": "core", "core": name }));
+        install::ensure_core(&core).await.map_err(|e| fail("download-failed", e))?;
     }
 
     let started = std::time::SystemTime::now();
-    let mut child = emulators::command(emu, exe, &rom.platform_slug, &target)?
-        .spawn()
-        .map_err(|e| format!("Impossible de lancer {} : {e}", emu.name))?;
+    let mut child = emulators::command(emu, exe, &rom.platform_slug, &target)
+        .and_then(|mut c| c.spawn().map_err(|e| format!("Impossible de lancer {} : {e}", emu.name)))
+        .map_err(|e| fail("launch-failed", e))?;
+    launch_state(&app, rom_id, json!({ "status": "running" }));
+
+    let app2 = app.clone();
     tauri::async_runtime::spawn(async move {
         let code = child.wait().await.ok().and_then(|s| s.code());
-        let _ = app.emit("game-exited", Exited { rom_id, code });
+        launch_state(&app2, rom_id, json!({ "status": "exited", "exitCode": code }));
         if save_dirs.is_empty() {
             return;
         }
-        sync_event(&app, rom_id, "uploading", None);
         let core = emu.core(&rom.platform_slug);
-        match saves::upload(&client, &rom, &emu.id, core, &save_dirs, &dest, started, &mut index).await {
-            Ok(true) => sync_event(&app, rom_id, "uploaded", None),
-            Ok(false) => sync_event(&app, rom_id, "unchanged", None),
-            Err(e) => sync_event(&app, rom_id, "error", Some(format!("Envoi de la sauvegarde : {e}"))),
+        let action = match saves::upload(&client, &rom, &emu.id, core, &save_dirs, &dest, started, &mut index).await {
+            Ok(true) => Some(json!({ "action": "uploaded", "slot": saves::SLOT })),
+            Ok(false) => None,
+            Err(e) => Some(json!({ "action": "failed", "slot": saves::SLOT, "detail": e })),
+        };
+        if let Some(sync) = action {
+            launch_state(&app2, rom_id, json!({ "status": "sync", "sync": sync }));
         }
     });
-    Ok(())
+    Ok(LaunchResult { rom_id, emulator: emu.name.clone() })
 }
 
-fn path_vars(app: &AppHandle) -> Result<emulators::PathVars, String> {
-    let p = app.path();
-    let e = |e: tauri::Error| e.to_string();
-    Ok(emulators::PathVars {
-        home: p.home_dir().map_err(e)?,
-        documents: p.document_dir().map_err(e)?,
-        appdata: p.data_dir().map_err(e)?,
-    })
+/// `rommNative.launch`. The request also carries the download path and cores,
+/// but the shell resolves the ROM and emulator itself from the ROM id.
+#[tauri::command]
+async fn native_launch(app: AppHandle, request: Value) -> Result<LaunchResult, LaunchError> {
+    let rom_id = request["romId"].as_u64().ok_or(LaunchError { code: "invalid-request", message: "romId manquant".into() })?;
+    launch(app, rom_id).await
 }
 
-#[derive(Serialize, Clone)]
-struct SyncStatus {
-    rom_id: u64,
-    state: &'static str,
-    message: Option<String>,
+#[tauri::command]
+fn native_cancel(_rom_id: u64) {}
+
+/// `rommNative.getPlatformSupportAll`: platform slug -> PlatformSupport.
+#[tauri::command]
+fn native_platform_support(app: AppHandle, queries: Vec<Value>) -> HashMap<String, Value> {
+    let cfg = config::load(&app);
+    queries
+        .iter()
+        .filter_map(|q| q["platformSlug"].as_str())
+        .map(|slug| {
+            let answer = match emulators::resolve(slug, &cfg.emulator_paths, &cfg.platform_emulators) {
+                Some((emu, _)) => json!({ "supported": true, "emulator": emu.name }),
+                None if emulators::catalog().iter().any(|e| e.platforms.iter().any(|p| p == slug)) => {
+                    json!({ "supported": false, "reason": "no-emulator-configured" })
+                }
+                None => json!({ "supported": false, "reason": "unsupported-platform" }),
+            };
+            (slug.to_string(), answer)
+        })
+        .collect()
 }
 
-fn sync_event(app: &AppHandle, rom_id: u64, state: &'static str, message: Option<String>) {
-    let _ = app.emit("save-sync", SyncStatus { rom_id, state, message });
+/// `rommNative.openSettings`: the app's own settings in a separate window.
+#[tauri::command]
+fn open_settings(app: AppHandle) -> Result<(), String> {
+    shell::open_settings(&app).map_err(|e| e.to_string())
+}
+
+/// Shows the RomM interface in the main window (after login / first-run setup).
+#[tauri::command]
+fn open_romm(app: AppHandle) -> Result<(), String> {
+    shell::open_romm(&app).map_err(|e| e.to_string())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -284,26 +339,18 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
-        // `romm://` proxies RomM resources (covers) with the user's credentials.
+        // `romm://` serves the bundled RomM interface and relays its API calls.
         .register_asynchronous_uri_scheme_protocol("romm", |ctx, req, responder| {
             let app = ctx.app_handle().clone();
-            let path = req.uri().path_and_query().map(|p| p.as_str().to_string()).unwrap_or_default();
-            tauri::async_runtime::spawn(async move {
-                let res = match async { client(&app)?.resource(&path).await }.await {
-                    Ok((ct, body)) => http::Response::builder()
-                        .header(http::header::CONTENT_TYPE, ct)
-                        .header("Cache-Control", "max-age=86400")
-                        .body(body),
-                    Err(e) => http::Response::builder().status(404).body(e.into_bytes()),
-                };
-                responder.respond(res.expect("valid response"));
-            });
+            tauri::async_runtime::spawn(async move { responder.respond(shell::handle(&app, req).await) });
+        })
+        .setup(|app| {
+            shell::create_main_window(app.handle())?;
+            Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             get_settings,
-            login,
-            platforms,
-            roms,
+            set_server,
             catalog,
             set_emulator_path,
             installable,
@@ -314,7 +361,11 @@ pub fn run() {
             cache_delete,
             cache_clear,
             install_emulator,
-            play
+            native_launch,
+            native_cancel,
+            native_platform_support,
+            open_settings,
+            open_romm
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

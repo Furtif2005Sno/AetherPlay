@@ -33,6 +33,9 @@ jobs:
         with:
           node-version: 22
           cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            romm-ui/package-lock.json
 
       - uses: dtolnay/rust-toolchain@stable
 
@@ -42,8 +45,14 @@ jobs:
 
       - run: npm ci
 
-      # The Rust crate embeds the built frontend, so build it before testing.
+      - run: npm ci
+        working-directory: romm-ui
+
+      # The Rust crate embeds the built frontends, so build them before testing.
       - run: npm run build
+
+      - run: npm run build
+        working-directory: romm-ui
 
       - run: cargo test --manifest-path src-tauri/Cargo.toml
 

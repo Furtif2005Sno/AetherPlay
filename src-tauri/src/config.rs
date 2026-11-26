@@ -47,6 +47,12 @@ pub fn set_password(user: &str, password: &str) -> Result<(), String> {
     entry(user)?.set_password(password).map_err(|e| e.to_string())
 }
 
+pub fn clear_password(user: &str) {
+    if let Ok(e) = entry(user) {
+        let _ = e.delete_credential();
+    }
+}
+
 pub fn get_password(user: &str) -> Option<String> {
     entry(user).ok()?.get_password().ok()
 }

@@ -1,24 +1,29 @@
 # AetherPlay
 
-Client desktop (Windows / macOS Apple Silicon) pour [RomM](https://github.com/rommapp/romm) :
-parcourir sa bibliothèque, cliquer sur **Jouer**, la ROM est téléchargée puis lancée dans l'émulateur adapté.
+Client desktop (Windows / macOS Apple Silicon) pour [RomM](https://github.com/rommapp/romm) : l'interface est celle de RomM elle-même (embarquée depuis RomM 5.4.1, voir `romm-ui/AETHERPLAY.md`), et le bouton **Jouer** télécharge la ROM puis la lance dans un émulateur local, avec synchronisation des sauvegardes.
 
-Stack : **Tauri 2** (backend Rust) + Vue 3, avec les design tokens du front RomM.
+Stack : **Tauri 2** (backend Rust). AetherPlay implémente `window.rommNative`, le contrat « desktop shell » prévu par RomM.
+
+Licence : **AGPL-3.0** (comme RomM, dont l'interface est reprise).
 
 ## Développement
 
 ```sh
 npm install
+npm --prefix romm-ui ci
+npm --prefix romm-ui run build
 npm run tauri dev      # lancer en dev
 npm run tauri build    # générer l'installeur
 ```
 
 ## Structure
 
-- `src-tauri/src/romm.rs`: client API RomM (auth Basic, plateformes, ROMs, téléchargement, covers)
+- `romm-ui/`: interface de RomM 5.4.1 embarquée (voir `romm-ui/AETHERPLAY.md`)
+- `src-tauri/src/shell.rs` + `bridge.js`: sert l'interface RomM sur `romm://`, relaie l'API vers le serveur, fournit `window.rommNative`
+- `src-tauri/src/romm.rs`: client API RomM (ROM, téléchargement, sauvegardes)
 - `src-tauri/src/emulators.rs` + `catalog.json`: catalogue d'émulateurs, choix par plateforme, lancement
 - `src-tauri/src/config.rs`: réglages (mot de passe stocké dans le trousseau de l'OS)
-- `src/`: interface Vue (connexion, bibliothèque, réglages émulateurs)
+- `src/`: pages propres à AetherPlay (adresse du serveur, assistant d'émulateurs, fenêtre de réglages : émulateurs, stockage)
 
 ## Avancement
 

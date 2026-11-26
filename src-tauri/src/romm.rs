@@ -15,17 +15,6 @@ pub struct Client {
 }
 
 #[derive(Serialize, Deserialize, Clone)]
-pub struct Platform {
-    pub id: u64,
-    pub slug: String,
-    pub name: String,
-    #[serde(default)]
-    pub display_name: Option<String>,
-    #[serde(default)]
-    pub rom_count: u64,
-}
-
-#[derive(Serialize, Deserialize, Clone)]
 pub struct Rom {
     pub id: u64,
     pub platform_id: u64,
@@ -41,14 +30,6 @@ pub struct Rom {
     pub path_cover_large: Option<String>,
     #[serde(default)]
     pub multi: bool,
-}
-
-/// `/api/roms` is paginated on recent RomM versions, a plain list on older ones.
-#[derive(Deserialize)]
-#[serde(untagged)]
-enum RomList {
-    Page { items: Vec<Rom> },
-    List(Vec<Rom>),
 }
 
 #[derive(Deserialize, Clone)]
@@ -114,28 +95,6 @@ impl Client {
 
     async fn json<T: DeserializeOwned>(&self, url: Url) -> Result<T, String> {
         self.send(self.get(url)).await?.json().await.map_err(err)
-    }
-
-    pub async fn check_auth(&self) -> Result<(), String> {
-        self.send(self.get(self.url(&["api", "users", "me"]))).await.map(|_| ())
-    }
-
-    pub async fn platforms(&self) -> Result<Vec<Platform>, String> {
-        self.json(self.url(&["api", "platforms"])).await
-    }
-
-    pub async fn roms(&self, platform_id: u64) -> Result<Vec<Rom>, String> {
-        let mut url = self.url(&["api", "roms"]);
-        let id = platform_id.to_string();
-        url.query_pairs_mut()
-            .append_pair("platform_ids", &id)
-            .append_pair("platform_id", &id)
-            .append_pair("order_by", "name")
-            .append_pair("limit", "10000");
-        Ok(match self.json(url).await? {
-            RomList::Page { items } => items,
-            RomList::List(v) => v,
-        })
     }
 
     pub async fn rom(&self, id: u64) -> Result<Rom, String> {
@@ -204,21 +163,4 @@ impl Client {
         self.send(req).await.map(|_| ())
     }
 
-    /// Fetches a RomM resource (cover art…) as (content-type, bytes).
-    pub async fn resource(&self, path_and_query: &str) -> Result<(String, Vec<u8>), String> {
-        // RomM 5 sends full paths (`/assets/romm/resources/...`); older
-        // versions sent them relative to the resources folder.
-        let rel = path_and_query.trim_start_matches('/');
-        let rel =
-            if rel.starts_with("assets/") { rel.to_string() } else { format!("assets/romm/resources/{rel}") };
-        let url = self.base.join(&rel).map_err(err)?;
-        let res = self.send(self.get(url)).await?;
-        let ct = res
-            .headers()
-            .get(reqwest::header::CONTENT_TYPE)
-            .and_then(|v| v.to_str().ok())
-            .unwrap_or("application/octet-stream")
-            .to_string();
-        Ok((ct, res.bytes().await.map_err(err)?.to_vec()))
-    }
 }
