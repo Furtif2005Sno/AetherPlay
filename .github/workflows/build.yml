@@ -1,7 +1,7 @@
 name: Build
 
 # Push to main: installers as workflow artifacts.
-# Tag v*: same, plus a published GitHub release with the installers attached.
+# Tag v*: same, then a published GitHub release holding only the .msi and .dmg.
 on:
   push:
     branches: [main]
@@ -21,11 +21,13 @@ jobs:
         include:
           - os: windows-latest
             name: windows-x64
+            bundles: msi
+            installer: src-tauri/target/release/bundle/msi/*.msi
           - os: macos-latest # Apple Silicon (arm64)
             name: macos-arm64
+            bundles: dmg
+            installer: src-tauri/target/release/bundle/dmg/*.dmg
     runs-on: ${{ matrix.os }}
-    permissions:
-      contents: write
     steps:
       - uses: actions/checkout@v5
 
@@ -57,20 +59,34 @@ jobs:
 
       - run: cargo test --manifest-path src-tauri/Cargo.toml
 
-      - uses: tauri-apps/tauri-action@v0
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tagName: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || '' }}
-          releaseName: AetherPlay ${{ github.ref_name }}
-          releaseBody: Installeurs Windows et macOS (Apple Silicon). Voir le README pour le premier lancement sur Mac.
-          releaseDraft: false
+      - run: npm run tauri build -- --bundles ${{ matrix.bundles }}
 
       - uses: actions/upload-artifact@v4
         with:
           name: aetherplay-${{ matrix.name }}
           if-no-files-found: error
-          path: |
-            src-tauri/target/release/bundle/msi/*.msi
-            src-tauri/target/release/bundle/nsis/*.exe
-            src-tauri/target/release/bundle/dmg/*.dmg
+          path: ${{ matrix.installer }}
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: installers
+          merge-multiple: true
+
+      # Recreated from scratch so a re-run never leaves stale files behind.
+      - env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          gh release delete "$TAG" --repo "$GITHUB_REPOSITORY" --yes || true
+          gh release create "$TAG" installers/*.msi installers/*.dmg \
+            --repo "$GITHUB_REPOSITORY" \
+            --verify-tag \
+            --title "AetherPlay $TAG" \
+            --notes "Installeurs Windows (.msi) et macOS Apple Silicon (.dmg). Sur Mac, voir le README pour le premier lancement (app non notarisée)."
