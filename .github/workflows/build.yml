@@ -25,8 +25,8 @@ jobs:
             installer: src-tauri/target/release/bundle/msi/*.msi
           - os: macos-latest # Apple Silicon (arm64)
             name: macos-arm64
-            bundles: dmg
-            installer: src-tauri/target/release/bundle/dmg/*.dmg
+            bundles: app
+            installer: AetherPlay.dmg
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v5
@@ -61,10 +61,20 @@ jobs:
 
       - run: npm run tauri build -- --bundles ${{ matrix.bundles }}
 
-      # An unsigned bundle is reported as "damaged" by Gatekeeper; make sure the
-      # ad-hoc signature (bundle.macOS.signingIdentity "-") sealed the whole app.
+      # Gatekeeper reports an app without a bundle signature as "damaged", with
+      # no way to open it. Ad-hoc sign the whole bundle (free, no Apple account),
+      # check the seal, then build the .dmg from the signed app.
       - if: runner.os == 'macOS'
-        run: codesign --verify --deep --strict --verbose=2 src-tauri/target/release/bundle/macos/*.app
+        run: |
+          APP="$(ls -d src-tauri/target/release/bundle/macos/*.app | head -n 1)"
+          xattr -cr "$APP"
+          codesign --force --deep --sign - "$APP"
+          codesign --verify --deep --verbose=2 "$APP"
+          codesign --display --verbose=2 "$APP"
+          mkdir dmg-stage
+          cp -R "$APP" dmg-stage/
+          ln -s /Applications dmg-stage/Applications
+          hdiutil create -volname AetherPlay -srcfolder dmg-stage -ov -format UDZO AetherPlay.dmg
 
       - uses: actions/upload-artifact@v4
         with:
