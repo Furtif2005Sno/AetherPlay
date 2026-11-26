@@ -206,10 +206,12 @@ impl Client {
 
     /// Fetches a RomM resource (cover art…) as (content-type, bytes).
     pub async fn resource(&self, path_and_query: &str) -> Result<(String, Vec<u8>), String> {
-        let url = self
-            .base
-            .join(&format!("assets/romm/resources/{}", path_and_query.trim_start_matches('/')))
-            .map_err(err)?;
+        // RomM 5 sends full paths (`/assets/romm/resources/...`); older
+        // versions sent them relative to the resources folder.
+        let rel = path_and_query.trim_start_matches('/');
+        let rel =
+            if rel.starts_with("assets/") { rel.to_string() } else { format!("assets/romm/resources/{rel}") };
+        let url = self.base.join(&rel).map_err(err)?;
         let res = self.send(self.get(url)).await?;
         let ct = res
             .headers()
