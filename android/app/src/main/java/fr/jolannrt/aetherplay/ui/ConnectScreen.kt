@@ -60,6 +60,8 @@ fun ConnectScreen(
     btEvents: List<String> = emptyList(),
     btExtended: Boolean = true,
     onBtExtended: (Boolean) -> Unit = {},
+    btSerial: Boolean = true,
+    onBtSerial: (Boolean) -> Unit = {},
 ) {
     Row(
         Modifier
@@ -141,6 +143,18 @@ fun ConnectScreen(
                     Spacer(Modifier.height(8.dp))
                     OutlinedButton(onClick = onRetryBluetooth) { Text("Réessayer") }
                 }
+            }
+            Spacer(Modifier.height(12.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("Infos de jeu par Bluetooth (Windows)", color = Color.White, fontSize = 14.sp)
+                    Text(
+                        "Console, jaquette et numéro de joueur sans Wi-Fi, par un canal série à côté de la manette. " +
+                            "Désactivé : le téléphone n'annonce que la manette.",
+                        color = Muted, fontSize = 12.sp,
+                    )
+                }
+                Switch(checked = btSerial, onCheckedChange = onBtSerial)
             }
             Spacer(Modifier.height(12.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {

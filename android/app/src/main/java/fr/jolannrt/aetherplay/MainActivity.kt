@@ -99,6 +99,7 @@ class MainActivity : ComponentActivity() {
             val btInfo by hid.info.collectAsState()
             val btEvents by hid.events.collectAsState()
             var btExtended by remember { mutableStateOf(hid.extended) }
+            var btSerial by remember { mutableStateOf(Controller.btLink.enabled) }
             val wifiUp = linkStatusNow is Link.Status.Connected
             // Bluetooth serial channel (with cover), else the experimental HID channel.
             val btLinkUp by Controller.btLink.connected.collectAsState()
@@ -218,6 +219,8 @@ class MainActivity : ComponentActivity() {
                     btEvents = btEvents,
                     btExtended = btExtended,
                     onBtExtended = { hid.extended = it; btExtended = it },
+                    btSerial = btSerial,
+                    onBtSerial = { Controller.btLink.enabled = it; btSerial = it },
                 )
             }
         }

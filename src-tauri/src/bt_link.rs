@@ -43,8 +43,35 @@ mod win {
         connect, recv, send, setsockopt, socket,
     };
 
-    /// The app's service (android/…/bt/BtLink.kt).
-    const SERVICE: windows::core::GUID = windows::core::GUID::from_u128(0x6e3a5c1e_7f2b_4c1a_9d6e_ae7e4b1a0001);
+    /// The app's service (android/…/bt/BtLink.kt): the standard Serial Port
+    /// Profile, which Windows has a driver for. Other devices may offer it
+    /// too, so nothing is sent before the app's hello.
+    const SERVICE: windows::core::GUID = windows::core::GUID::from_u128(0x00001101_0000_1000_8000_00805f9b34fb);
+
+    /// Waits up to 3 s for the app's `{"t":"hello","v":1,…}` line; its name.
+    fn handshake(s: SOCKET) -> Option<String> {
+        let mut pending = Vec::new();
+        let mut buf = [0u8; 512];
+        for _ in 0..12 {
+            // SAFETY: reading into a local buffer from our socket (250 ms timeout).
+            let n = unsafe { recv(s, &mut buf, SEND_RECV_FLAGS(0)) };
+            if n == 0 {
+                return None;
+            }
+            if n > 0 {
+                pending.extend_from_slice(&buf[..n as usize]);
+                if let Some(i) = pending.iter().position(|b| *b == b'\n') {
+                    let msg: Value = serde_json::from_slice(&pending[..i]).ok()?;
+                    return (msg["t"] == "hello" && msg["v"].as_u64().is_some())
+                        .then(|| msg["name"].as_str().unwrap_or("Android").to_string());
+                }
+                if pending.len() > 4096 {
+                    return None;
+                }
+            }
+        }
+        None
+    }
 
     /// Linked phones: Bluetooth address -> channel to their thread.
     static LINKS: Mutex<Vec<(u64, mpsc::Sender<u8>)>> = Mutex::new(Vec::new());
@@ -124,6 +151,7 @@ mod win {
 
     /// One linked phone, until the link drops.
     fn serve(app: AppHandle, addr: u64, name: String, s: SOCKET, players: mpsc::Receiver<u8>) {
+        // `name`: the phone's model from its hello.
         let (id, mut player) = phone::bluetooth_join(&name);
         shell::log(&app, &format!("manette Android liée en Bluetooth : {name} (joueur {player})"));
         let mut events = phone::subscribe();
@@ -193,7 +221,7 @@ mod win {
             // Devices without the service, tried again after a minute.
             let mut tried: HashMap<u64, Instant> = HashMap::new();
             loop {
-                for (addr, name) in connected_devices() {
+                for (addr, _bt_name) in connected_devices() {
                     if LINKS.lock().expect("bt links").iter().any(|(a, _)| *a == addr) {
                         continue;
                     }
@@ -202,6 +230,12 @@ mod win {
                     }
                     tried.insert(addr, Instant::now());
                     if let Some(s) = open(addr) {
+                        // Only the AetherPlay app introduces itself.
+                        let Some(name) = handshake(s) else {
+                            // SAFETY: closing the socket we opened.
+                            unsafe { closesocket(s) };
+                            continue;
+                        };
                         tried.remove(&addr);
                         let (tx, rx) = mpsc::channel();
                         LINKS.lock().expect("bt links").push((addr, tx));

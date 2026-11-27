@@ -33,8 +33,16 @@ class BtLink(private val context: Context) {
     @Volatile private var socket: BluetoothSocket? = null
     @Volatile private var running = false
 
+    /** Off: the phone only announces the controller (as in 0.4.2). */
+    var enabled: Boolean
+        get() = context.getSharedPreferences("bt", Context.MODE_PRIVATE).getBoolean("serial", true)
+        set(value) {
+            context.getSharedPreferences("bt", Context.MODE_PRIVATE).edit().putBoolean("serial", value).apply()
+            if (value) start() else stop()
+        }
+
     fun start() {
-        if (running) return
+        if (running || !enabled) return
         val adapter = (context.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager)?.adapter ?: return
         running = true
         Thread({
@@ -110,7 +118,12 @@ class BtLink(private val context: Context) {
 
     companion object {
         const val SERVICE_NAME = "AetherPlay"
-        /** Same UUID on the computer side (src-tauri/src/bt_link.rs). */
-        val SERVICE_UUID: UUID = UUID.fromString("6e3a5c1e-7f2b-4c1a-9d6e-ae7e4b1a0001")
+        /**
+         * The standard Serial Port Profile UUID: Windows has a built-in driver
+         * for it (an unknown UUID shows the phone as "Driver error"). Same on
+         * the computer side (src-tauri/src/bt_link.rs), which waits for the
+         * app's hello before sending anything.
+         */
+        val SERVICE_UUID: UUID = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB")
     }
 }

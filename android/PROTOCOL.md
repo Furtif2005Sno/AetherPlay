@@ -25,7 +25,7 @@ Les navigateurs, donc l'interface RomM, lisent ce rapport tel quel. Pour les ém
 
 ## Canal série Bluetooth (Windows)
 
-À côté de la manette, qui reste la manette simple, l'app ouvre un service Bluetooth série (RFCOMM, UUID `6e3a5c1e-7f2b-4c1a-9d6e-ae7e4b1a0001`, nom « AetherPlay »). Toutes les 5 secondes, AetherPlay essaie ce service sur les appareils Bluetooth connectés au PC ; seul le téléphone l'a. Une fois relié :
+À côté de la manette, qui reste la manette simple, l'app ouvre un service Bluetooth série (RFCOMM, UUID standard SPP `00001101-0000-1000-8000-00805F9B34FB`, que Windows sait gérer ; un UUID inconnu faisait afficher « Driver error »). AetherPlay n'envoie rien avant d'avoir reçu le `hello` de l'app, car d'autres appareils peuvent proposer le même service. Dans l'app, un interrupteur coupe ce canal : le téléphone n'annonce alors que la manette. Toutes les 5 secondes, AetherPlay essaie ce service sur les appareils Bluetooth connectés au PC ; seul le téléphone l'a. Une fois relié :
 - **Du PC vers le téléphone :** les mêmes messages JSON qu'en Wi-Fi, un par ligne : `game` (avec la jaquette), `idle`, `player`.
 - **Du téléphone vers le PC :** `hello`, puis `quit` (bouton « Quitter le jeu »).
 
