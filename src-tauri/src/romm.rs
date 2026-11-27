@@ -98,6 +98,81 @@ impl Client {
         self.send(self.get(url)).await?.json().await.map_err(err)
     }
 
+    fn json_request(&self, method: reqwest::Method, segments: &[&str]) -> RequestBuilder {
+        self.http.request(method, self.url(segments)).basic_auth(&self.user, Some(&self.pass))
+    }
+
+    /// Registers this computer as a RomM device (once; RomM returns the
+    /// existing one if asked again); its id is used for "now playing".
+    pub async fn register_device(&self, name: &str, hostname: &str, os: &str) -> Result<String, String> {
+        let body = serde_json::json!({
+            "name": name,
+            "platform": os,
+            "client": "AetherPlay",
+            "client_version": env!("CARGO_PKG_VERSION"),
+            "hostname": hostname,
+            "allow_existing": true,
+        });
+        let res: serde_json::Value = self
+            .send(self.json_request(reqwest::Method::POST, &["api", "devices"]).json(&body))
+            .await?
+            .json()
+            .await
+            .map_err(err)?;
+        res["device_id"].as_str().map(str::to_owned).ok_or_else(|| "RomM n'a pas renvoyé d'appareil".into())
+    }
+
+    /// RomM's "now playing": this device plays `rom_id` (repeated during the game).
+    pub async fn heartbeat(&self, rom_id: u64, device_id: &str) -> Result<(), String> {
+        let body = serde_json::json!({ "rom_id": rom_id, "device_id": device_id });
+        self.send(self.json_request(reqwest::Method::POST, &["api", "activity", "heartbeat"]).json(&body))
+            .await
+            .map(|_| ())
+    }
+
+    /// The game is over for this device.
+    pub async fn clear_activity(&self, device_id: &str) -> Result<(), String> {
+        let req = self.json_request(reqwest::Method::DELETE, &["api", "activity", "heartbeat"]).query(&[("device_id", device_id)]);
+        self.send(req).await.map(|_| ())
+    }
+
+    /// The logged-in user (id, ui_settings…).
+    pub async fn me(&self) -> Result<serde_json::Value, String> {
+        self.json(self.url(&["api", "users", "me"])).await
+    }
+
+    /// Replaces the user's ui_settings (callers merge with the current ones).
+    pub async fn set_ui_settings(&self, user_id: u64, settings: &serde_json::Value) -> Result<(), String> {
+        let form = [("ui_settings", settings.to_string())];
+        self.send(self.json_request(reqwest::Method::PUT, &["api", "users", &user_id.to_string()]).form(&form))
+            .await
+            .map(|_| ())
+    }
+
+    /// A read-only access for an Android controller, and a short code the
+    /// phone exchanges for it (the user's password never reaches the phone).
+    pub async fn phone_pairing_code(&self, name: &str) -> Result<(String, u64), String> {
+        let body = serde_json::json!({
+            "name": name,
+            "scopes": ["me.read", "roms.read", "platforms.read", "devices.read"],
+        });
+        let token: serde_json::Value = self
+            .send(self.json_request(reqwest::Method::POST, &["api", "client-tokens"]).json(&body))
+            .await?
+            .json()
+            .await
+            .map_err(err)?;
+        let id = token["id"].as_u64().ok_or("RomM n'a pas créé l'accès")?;
+        let pair: serde_json::Value = self
+            .send(self.json_request(reqwest::Method::POST, &["api", "client-tokens", &id.to_string(), "pair"]))
+            .await?
+            .json()
+            .await
+            .map_err(err)?;
+        let code = pair["code"].as_str().ok_or("RomM n'a pas donné de code")?.to_string();
+        Ok((code, pair["expires_in"].as_u64().unwrap_or(0)))
+    }
+
     /// Small cover image bytes (shown on the Android controller), if RomM has one.
     pub async fn cover(&self, rom: &Rom) -> Option<Vec<u8>> {
         let path = rom.path_cover_small.as_deref().filter(|p| !p.is_empty())?;

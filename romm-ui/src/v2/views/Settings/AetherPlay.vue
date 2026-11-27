@@ -44,6 +44,16 @@ const refreshPhone = async () => {
   const seen = new Set(native.map((p) => p.name));
   detected.value = [...native, ...phone.value.pads.filter((n) => !seen.has(n)).map((name) => ({ name, phone: false }))];
 };
+const serverCode = ref<{ server: string; code: string; expires_in: number } | null>(null);
+async function linkPhoneToServer() {
+  error.value = "";
+  try {
+    serverCode.value = await app.phoneServerCode();
+  } catch (e) {
+    error.value = String(e);
+  }
+}
+
 const installingVigem = ref(false);
 async function installVigem() {
   installingVigem.value = true;
@@ -262,6 +272,23 @@ onUnmounted(() => {
           @click="installVigem"
         >
           Installer le pilote
+        </RBtn>
+      </div>
+      <div class="aep-row">
+        <div class="aep-row__info">
+          <div class="aep-row__title">Téléphone en Bluetooth seul (sans réseau commun)</div>
+          <div class="aep-muted">
+            Le téléphone lit le jeu en cours et son numéro de joueur directement sur ton serveur RomM. À faire une fois :
+            génère un code, puis dans l'app (Connexion > Serveur RomM) tape l'adresse du serveur et ce code.
+          </div>
+          <div v-if="serverCode" class="aep-muted">
+            Serveur : <span class="aep-pin">{{ serverCode.server }}</span> · Code :
+            <span class="aep-pin">{{ serverCode.code }}</span>
+            <template v-if="serverCode.expires_in"> (valable {{ Math.round(serverCode.expires_in / 60) }} min)</template>
+          </div>
+        </div>
+        <RBtn size="small" variant="outlined" prepend-icon="mdi-link-variant" @click="linkPhoneToServer">
+          Générer un code
         </RBtn>
       </div>
       <div class="aep-row">

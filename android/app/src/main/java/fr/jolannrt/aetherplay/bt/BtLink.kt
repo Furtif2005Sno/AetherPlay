@@ -35,9 +35,9 @@ class BtLink(private val context: Context) {
 
     /** Off: the phone only announces the controller (as in 0.4.2). */
     var enabled: Boolean
-        get() = context.getSharedPreferences("bt", Context.MODE_PRIVATE).getBoolean("serial", true)
+        get() = context.getSharedPreferences("bt", Context.MODE_PRIVATE).getBoolean("serial_v2", false)
         set(value) {
-            context.getSharedPreferences("bt", Context.MODE_PRIVATE).edit().putBoolean("serial", value).apply()
+            context.getSharedPreferences("bt", Context.MODE_PRIVATE).edit().putBoolean("serial_v2", value).apply()
             if (value) start() else stop()
         }
 

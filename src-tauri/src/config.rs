@@ -30,6 +30,9 @@ pub struct Config {
     /// Emulators whose second-screen window AetherPlay turned on (to undo it).
     #[serde(default)]
     pub dual_screen: Vec<String>,
+    /// This computer as a RomM device ("now playing" relay for phones).
+    #[serde(default)]
+    pub romm_device_id: Option<String>,
 }
 
 fn default_true() -> bool {
@@ -48,6 +51,7 @@ impl Default for Config {
             quit_combo: true,
             phones: HashMap::new(),
             dual_screen: Vec::new(),
+            romm_device_id: None,
         }
     }
 }

@@ -9,6 +9,7 @@ mod gamepad;
 mod import;
 mod install;
 mod phone;
+mod relay;
 mod players;
 mod romm;
 mod roms;
@@ -279,9 +280,12 @@ async fn launch(app: AppHandle, rom_id: u64, fullscreen: bool) -> Result<LaunchR
                 let found = controller::detect(&lib)?;
                 // Bluetooth phones get player numbers in the emulator's order.
                 bt_phone::order(found.pads.iter().map(|p| p.path.clone()).collect());
-                bt_link::order(
-                    found.pads.iter().enumerate().filter(|(_, p)| p.name == "AetherPlay Manette").map(|(i, _)| i).collect(),
-                );
+                let phone_positions: Vec<usize> =
+                    found.pads.iter().enumerate().filter(|(_, p)| p.name == "AetherPlay Manette").map(|(i, _)| i).collect();
+                bt_link::order(phone_positions.clone());
+                // Through RomM for phones without a network link: Bluetooth name -> player.
+                let bt_players: Vec<(String, u8)> =
+                    bt_link::connected_phones().into_iter().zip(phone_positions.iter().map(|i| (*i + 1) as u8)).collect();
                 // RetroTogether: each controller becomes a player in the emulator.
                 let players = match (emu_id.as_str(), &ini, &save_dir) {
                     (_, Some(ini), _) => controller::apply(ini, &found.pads)?,
@@ -295,13 +299,14 @@ async fn launch(app: AppHandle, rom_id: u64, fullscreen: bool) -> Result<LaunchR
                     _ => None,
                 }
                 .filter(|s| !s.is_empty());
-                Ok::<_, String>((found.phone_mappings, players))
+                Ok::<_, String>((found.phone_mappings, players, bt_players))
             })
             .await
             .map_err(|e| e.to_string())
             .and_then(|r| r);
             match res {
-                Ok((mappings, applied)) => {
+                Ok((mappings, applied, bt_players)) => {
+                    relay::publish_players(app.clone(), client.clone(), bt_players);
                     if !mappings.is_empty() {
                         shell::log(&app, "manette : manette Android (Bluetooth) détectée");
                     }
@@ -411,6 +416,7 @@ async fn launch(app: AppHandle, rom_id: u64, fullscreen: bool) -> Result<LaunchR
     }
     // The Android controller switches to this console's layout.
     phone::game_started(&rom, client.cover(&rom).await);
+    relay::game_started(app.clone(), client.clone(), rom.id);
 
     let app2 = app.clone();
     tauri::async_runtime::spawn(async move {
@@ -420,6 +426,7 @@ async fn launch(app: AppHandle, rom_id: u64, fullscreen: bool) -> Result<LaunchR
             dualscreen::stop();
         }
         phone::game_ended();
+        relay::game_ended(app2.clone(), client.clone());
         // Back to the library, ready for the next pick with the controller.
         if let Some(win) = app2.get_webview_window("main") {
             let _ = win.set_focus();
@@ -603,6 +610,14 @@ async fn proxy_upload(app: AppHandle, request: tauri::ipc::Request<'_>) -> Resul
     }))
 }
 
+/// Links an Android controller to the RomM server (for Bluetooth-only use):
+/// a short code to type in the app, with the server address.
+#[tauri::command]
+async fn phone_server_code(app: AppHandle) -> Result<serde_json::Value, String> {
+    let (code, expires_in) = client(&app)?.phone_pairing_code("AetherPlay manette").await?;
+    Ok(serde_json::json!({ "server": config::load(&app).server_url, "code": code, "expires_in": expires_in }))
+}
+
 /// The update to offer in the pop-up, if any.
 #[tauri::command]
 fn update_status() -> Option<serde_json::Value> {
@@ -723,6 +738,7 @@ pub fn run() {
             image_cache_clear,
             proxy_upload,
             update_status,
+            phone_server_code,
             update_later,
             update_install,
             install_vigem

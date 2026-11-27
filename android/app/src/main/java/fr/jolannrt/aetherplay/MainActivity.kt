@@ -105,7 +105,16 @@ class MainActivity : ComponentActivity() {
             val btLinkUp by Controller.btLink.connected.collectAsState()
             val btLinkGame by Controller.btLink.game.collectAsState()
             val btLinkPlayer by Controller.btLink.player.collectAsState()
-            val btGame = if (btLinkUp) btLinkGame else btInfo?.platform?.let { fr.jolannrt.aetherplay.net.Game(it, btInfo?.name ?: it, null) }
+            // Through the RomM server when there is no Wi-Fi link (Bluetooth only).
+            val relayLinked by Controller.relay.linked.collectAsState()
+            val relayGame by Controller.relay.game.collectAsState()
+            val relayPlayer by Controller.relay.player.collectAsState()
+            LaunchedEffect(relayLinked, wifiUp) { Controller.relay.setActive(relayLinked && !wifiUp) }
+            val btGame = when {
+                btLinkUp -> btLinkGame
+                relayLinked -> relayGame
+                else -> btInfo?.platform?.let { fr.jolannrt.aetherplay.net.Game(it, btInfo?.name ?: it, null) }
+            }
             val game = preview?.let { fr.jolannrt.aetherplay.net.Game(it, "Aperçu : $it", null) }
                 ?: if (wifiUp) linkGame else btGame
             val token by link.token.collectAsState()
@@ -114,6 +123,7 @@ class MainActivity : ComponentActivity() {
             val player = when {
                 wifiUp -> linkPlayer
                 btLinkUp -> btLinkPlayer
+                relayLinked && relayPlayer > 0 -> relayPlayer
                 else -> btInfo?.player ?: 0
             }
             val wifiInput by link.wifiInput.collectAsState()
@@ -220,6 +230,12 @@ class MainActivity : ComponentActivity() {
                     btExtended = btExtended,
                     onBtExtended = { hid.extended = it; btExtended = it },
                     btSerial = btSerial,
+                    serverLinked = relayLinked,
+                    serverUrl = Controller.relay.server,
+                    onServerLink = { url, code, done ->
+                        scope.launch { done(Controller.relay.link(url, code).exceptionOrNull()?.message) }
+                    },
+                    onServerUnlink = { Controller.relay.unlink() },
                     onBtSerial = { Controller.btLink.enabled = it; btSerial = it },
                 )
             }

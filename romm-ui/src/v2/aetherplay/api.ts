@@ -86,6 +86,7 @@ export const app = {
   phoneStatus: () => invoke<PhoneStatus>("phone_status"),
   phoneForget: () => invoke<void>("phone_forget"),
   installVigem: () => invoke<void>("install_vigem"),
+  phoneServerCode: () => invoke<{ server: string; code: string; expires_in: number }>("phone_server_code"),
   imageCacheSize: () => invoke<number>("image_cache_size"),
   imageCacheClear: () => invoke<void>("image_cache_clear"),
   onInstallProgress: (handler: (p: { id: string; done: number; total: number }) => void) =>

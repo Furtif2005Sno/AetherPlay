@@ -12,9 +12,13 @@
 pub fn spawn(_app: tauri::AppHandle) {}
 #[cfg(not(windows))]
 pub fn order(_positions: Vec<usize>) {}
+#[cfg(not(windows))]
+pub fn connected_phones() -> Vec<String> {
+    Vec::new()
+}
 
 #[cfg(windows)]
-pub use win::{order, spawn};
+pub use win::{connected_phones, order, spawn};
 
 /// One message line: the JSON text and a newline.
 #[cfg_attr(not(windows), allow(dead_code))]
@@ -108,6 +112,43 @@ mod win {
                 if info.fConnected.as_bool() {
                     let end = info.szName.iter().position(|c| *c == 0).unwrap_or(info.szName.len());
                     out.push((info.Address.Anonymous.ullLong, String::from_utf16_lossy(&info.szName[..end])));
+                }
+                if BluetoothFindNextDevice(find, &mut info).is_err() {
+                    break;
+                }
+            }
+            let _ = BluetoothFindDeviceClose(find);
+        }
+        out
+    }
+
+    /// Names of the phones connected to this computer by Bluetooth (major
+    /// device class 2 = phone), in Windows' order.
+    pub fn connected_phones() -> Vec<String> {
+        connected_devices_with_class().into_iter().filter(|(_, _, class)| (class >> 8) & 0x1F == 0x02).map(|(_, n, _)| n).collect()
+    }
+
+    fn connected_devices_with_class() -> Vec<(u64, String, u32)> {
+        let mut out = Vec::new();
+        // SAFETY: same as connected_devices.
+        unsafe {
+            let params = BLUETOOTH_DEVICE_SEARCH_PARAMS {
+                dwSize: std::mem::size_of::<BLUETOOTH_DEVICE_SEARCH_PARAMS>() as u32,
+                fReturnAuthenticated: true.into(),
+                fReturnRemembered: false.into(),
+                fReturnUnknown: false.into(),
+                fReturnConnected: true.into(),
+                fIssueInquiry: false.into(),
+                cTimeoutMultiplier: 0,
+                hRadio: HANDLE::default(),
+            };
+            let mut info: BLUETOOTH_DEVICE_INFO = std::mem::zeroed();
+            info.dwSize = std::mem::size_of::<BLUETOOTH_DEVICE_INFO>() as u32;
+            let Ok(find) = BluetoothFindFirstDevice(&params, &mut info) else { return out };
+            loop {
+                if info.fConnected.as_bool() {
+                    let end = info.szName.iter().position(|c| *c == 0).unwrap_or(info.szName.len());
+                    out.push((info.Address.Anonymous.ullLong, String::from_utf16_lossy(&info.szName[..end]), info.ulClassofDevice));
                 }
                 if BluetoothFindNextDevice(find, &mut info).is_err() {
                     break;

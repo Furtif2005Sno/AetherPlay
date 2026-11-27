@@ -19,6 +19,9 @@ object Controller {
     /** Game info over Bluetooth, beside the controller (no Wi-Fi needed). */
     lateinit var btLink: fr.jolannrt.aetherplay.bt.BtLink
         private set
+    /** Game info through the RomM server (Bluetooth-only use). */
+    lateinit var relay: fr.jolannrt.aetherplay.net.ServerRelay
+        private set
     val link = Link()
     private var ready = false
 
@@ -28,6 +31,7 @@ object Controller {
         discovery = Discovery(app)
         hid = HidGamepad(app)
         btLink = fr.jolannrt.aetherplay.bt.BtLink(app)
+        relay = fr.jolannrt.aetherplay.net.ServerRelay(app)
         ready = true
     }
 

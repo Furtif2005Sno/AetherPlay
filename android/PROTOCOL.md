@@ -23,7 +23,14 @@ Le téléphone répond aux demandes de rapport du PC : l'état de la manette pou
 
 Les navigateurs, donc l'interface RomM, lisent ce rapport tel quel. Pour les émulateurs, AetherPlay ajoute la configuration SDL correspondante (`SDL_GAMECONTROLLERCONFIG`) et un profil RetroArch. Il reconnaît la manette à son nom ou, à défaut, à sa forme (17 boutons, 4 axes, pas de chapeau).
 
-## Canal série Bluetooth (Windows)
+## Relais par le serveur RomM (Bluetooth seul)
+
+Quand le téléphone n'a pas de réseau commun avec l'ordinateur, c'est le serveur RomM qui fait le lien :
+- **Liaison, une seule fois :** AetherPlay crée pour le téléphone un jeton client RomM en lecture seule (`me.read`, `roms.read`, `platforms.read`, `devices.read`) et affiche son code d'appairage (`POST /api/client-tokens/{id}/pair`). L'app l'échange contre le jeton (`POST /api/client-tokens/exchange`). Le mot de passe ne quitte jamais l'ordinateur.
+- **Jeu en cours :** pendant la partie, AetherPlay publie le « en train de jouer » de RomM (`POST /api/activity/heartbeat`, appareil RomM enregistré une fois, toutes les minutes, effacé à la fin). L'app lit `GET /api/activity` toutes les 4 secondes : console, nom du jeu, jaquette.
+- **Numéros de joueur :** dans `ui_settings.aetherplay.players` de l'utilisateur, sous la forme nom Bluetooth du téléphone → numéro. Sur Windows, ce sont les appareils connectés de classe « téléphone », appariés dans l'ordre aux manettes Android vues par l'émulateur.
+
+## Canal série Bluetooth (Windows, désactivé par défaut)
 
 À côté de la manette, qui reste la manette simple, l'app ouvre un service Bluetooth série (RFCOMM, UUID standard SPP `00001101-0000-1000-8000-00805F9B34FB`, que Windows sait gérer ; un UUID inconnu faisait afficher « Driver error »). AetherPlay n'envoie rien avant d'avoir reçu le `hello` de l'app, car d'autres appareils peuvent proposer le même service. Dans l'app, un interrupteur coupe ce canal : le téléphone n'annonce alors que la manette. Toutes les 5 secondes, AetherPlay essaie ce service sur les appareils Bluetooth connectés au PC ; seul le téléphone l'a. Une fois relié :
 - **Du PC vers le téléphone :** les mêmes messages JSON qu'en Wi-Fi, un par ligne : `game` (avec la jaquette), `idle`, `player`.

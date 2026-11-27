@@ -62,6 +62,10 @@ fun ConnectScreen(
     onBtExtended: (Boolean) -> Unit = {},
     btSerial: Boolean = true,
     onBtSerial: (Boolean) -> Unit = {},
+    serverLinked: Boolean = false,
+    serverUrl: String? = null,
+    onServerLink: (String, String, (String?) -> Unit) -> Unit = { _, _, _ -> },
+    onServerUnlink: () -> Unit = {},
 ) {
     Row(
         Modifier
@@ -145,6 +149,8 @@ fun ConnectScreen(
                 }
             }
             Spacer(Modifier.height(12.dp))
+            ServerCard(serverLinked, serverUrl, onServerLink, onServerUnlink)
+            Spacer(Modifier.height(12.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text("Infos de jeu par Bluetooth (Windows)", color = Color.White, fontSize = 14.sp)
@@ -181,6 +187,49 @@ fun ConnectScreen(
             ) { Text("Afficher la manette") }
         }
     }
+}
+
+/** Link to the RomM server: game info without a network link to AetherPlay. */
+@Composable
+private fun ServerCard(
+    linked: Boolean,
+    url: String?,
+    onLink: (String, String, (String?) -> Unit) -> Unit,
+    onUnlink: () -> Unit,
+) {
+    Text("Serveur RomM (Bluetooth seul)", color = Color.White, fontSize = 14.sp)
+    if (linked) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Relié à ${url ?: "RomM"} : jeu en cours et numéro de joueur lus sur le serveur.", color = Accent, fontSize = 12.sp, modifier = Modifier.weight(1f))
+            OutlinedButton(onClick = onUnlink) { Text("Délier") }
+        }
+        return
+    }
+    Text(
+        "Sans réseau commun avec l'ordinateur, le téléphone lit le jeu en cours sur ton serveur. Dans AetherPlay : " +
+            "Réglages > AetherPlay > Manette Android > Générer un code, puis tape ici l'adresse et le code.",
+        color = Muted, fontSize = 12.sp,
+    )
+    var server by remember { mutableStateOf(url ?: "") }
+    var code by remember { mutableStateOf("") }
+    var message by remember { mutableStateOf<String?>(null) }
+    var busy by remember { mutableStateOf(false) }
+    OutlinedTextField(server, { server = it.trim() }, label = { Text("Adresse du serveur RomM") }, singleLine = true,
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri), modifier = Modifier.fillMaxWidth())
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        OutlinedTextField(code, { code = it.trim() }, label = { Text("Code") }, singleLine = true, modifier = Modifier.weight(1f))
+        Spacer(Modifier.width(8.dp))
+        Button(
+            onClick = {
+                busy = true
+                message = null
+                onLink(server, code) { error -> busy = false; message = error?.let { "Échec : $it" } }
+            },
+            enabled = !busy && server.isNotEmpty() && code.isNotEmpty(),
+            colors = ButtonDefaults.buttonColors(containerColor = Accent),
+        ) { Text("Relier") }
+    }
+    message?.let { Text(it, color = Color(0xFFFF6B6B), fontSize = 12.sp) }
 }
 
 @Composable
