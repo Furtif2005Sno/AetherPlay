@@ -13,8 +13,8 @@ android {
         // BluetoothHidDevice (the phone as a Bluetooth controller) needs Android 9.
         minSdk = 28
         targetSdk = 36
-        versionCode = 9
-        versionName = "0.4.4"
+        versionCode = 10
+        versionName = "0.4.5"
     }
 
     signingConfigs {

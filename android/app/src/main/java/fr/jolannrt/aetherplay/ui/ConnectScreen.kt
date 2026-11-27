@@ -145,9 +145,9 @@ fun ConnectScreen(
             Spacer(Modifier.height(12.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
-                    Text("Infos AetherPlay par Bluetooth", color = Color.White, fontSize = 14.sp)
+                    Text("Infos AetherPlay par Bluetooth (expérimental)", color = Color.White, fontSize = 14.sp)
                     Text(
-                        "Console du jeu et numéro de joueur sans Wi-Fi. Si la liaison décroche, désactive : manette simple. " +
+                        "Console du jeu et numéro de joueur sans Wi-Fi. Certains ordinateurs refusent cette manette : si la liaison décroche, désactive. " +
                             "Après un changement, supprime le téléphone des appareils Bluetooth de l'ordinateur et associe-le de nouveau.",
                         color = Muted, fontSize = 12.sp,
                     )

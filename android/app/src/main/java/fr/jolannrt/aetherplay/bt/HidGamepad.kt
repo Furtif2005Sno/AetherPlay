@@ -51,13 +51,14 @@ class HidGamepad(private val context: Context) {
     }
 
     /**
-     * With the AetherPlay channel (game + player over Bluetooth) or as a plain
-     * controller (the 0.4.2 one). Changing it needs the computer to pair again.
+     * With the AetherPlay channel (game + player over Bluetooth, experimental:
+     * Windows may refuse that descriptor) or as a plain controller (the 0.4.2
+     * one, default). Changing it needs the computer to pair again.
      */
     var extended: Boolean
-        get() = prefs().getBoolean("extended", true)
+        get() = prefs().getBoolean("extended_v2", false)
         set(value) {
-            prefs().edit().putBoolean("extended", value).apply()
+            prefs().edit().putBoolean("extended_v2", value).apply()
             stop()
             start()
         }
@@ -70,6 +71,9 @@ class HidGamepad(private val context: Context) {
     /** Set while the profile is wanted (between start and stop): reconnect on drops. */
     @Volatile private var active = false
     @Volatile private var last = PadState.IDLE
+    /** Reconnection attempts since the last steady link (spaced out, then given up). */
+    @Volatile private var retries = 0
+    @Volatile private var connectedAt = 0L
 
     private val callback = object : BluetoothHidDevice.Callback() {
         override fun onAppStatusChanged(pluggedDevice: BluetoothDevice?, registered: Boolean) {
@@ -119,6 +123,7 @@ class HidGamepad(private val context: Context) {
                 BluetoothProfile.STATE_CONNECTED -> {
                     host = device
                     saveHost(device)
+                    connectedAt = System.currentTimeMillis()
                     event("connectée à ${device.name ?: device.address}")
                     _status.value = Status.Connected(device.name ?: device.address)
                 }
@@ -128,9 +133,17 @@ class HidGamepad(private val context: Context) {
                     if (host == device) host = null
                     _info.value = null
                     if (_status.value is Status.Connected) _status.value = Status.Ready
-                    // Dropped (sleep, range, Windows power saving): call the computer back.
-                    if (active && device.address == lastHost()?.address) {
-                        executor.schedule({ if (active && host == null) hid?.connect(device) }, 3, TimeUnit.SECONDS)
+                    // Dropped (sleep, range, Windows power saving): call the computer
+                    // back, more and more slowly, then stop (a computer refusing the
+                    // controller would otherwise make it connect / drop in a loop).
+                    if (System.currentTimeMillis() - connectedAt > 60_000) retries = 0
+                    val delays = longArrayOf(3, 10, 30, 60, 120)
+                    if (active && device.address == lastHost()?.address && retries < delays.size) {
+                        val delay = delays[retries++]
+                        event("nouvelle tentative dans $delay s")
+                        executor.schedule({ if (active && host == null) hid?.connect(device) }, delay, TimeUnit.SECONDS)
+                    } else if (retries >= delays.size) {
+                        event("reconnexion abandonnée : reconnecte depuis l'ordinateur")
                     }
                 }
             }
@@ -141,6 +154,7 @@ class HidGamepad(private val context: Context) {
         // Already registered: keep the link (re-registering drops the computer).
         if (active && hid != null) return
         active = true
+        retries = 0
         val a = adapter ?: run {
             _status.value = Status.Unavailable("Pas de Bluetooth sur ce téléphone")
             return
