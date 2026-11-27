@@ -12,8 +12,29 @@ const PRIORITY: &[&str] = &[
     "m3u", "cue", "gdi", "ccd", "mds", "chd", "iso", "cso", "rvz", "gcm", "wbfs", "wua", "wud", "rpx",
     "xci", "nsp", "xcz", "nsz", "3ds", "cci", "cia", "nds", "pbp", "elf", "bin", "img",
 ];
-/// Base game + updates/DLC share these: the biggest file is the base game.
+/// Base game + updates/DLC share these: see `switch_role`.
 const LARGEST_WINS: &[&str] = &["xci", "nsp", "xcz", "nsz"];
+
+/// What a Switch file is, from its name: 0 base game, 1 unknown, 2 update or
+/// DLC. Dump names carry the title id (`[0100ABCD12340000]`: base ids end in
+/// 000, updates in 800, DLC in their index) and often a tag
+/// (`[UPD]`, `[DLC]`, `[v131072]` for an update version).
+fn switch_role(p: &Path) -> u8 {
+    let name = p.file_name().map(|n| n.to_string_lossy().to_lowercase()).unwrap_or_default();
+    let ids: Vec<&str> = name
+        .split(|c: char| !c.is_ascii_hexdigit())
+        .filter(|w| w.len() == 16 && w.starts_with("01"))
+        .collect();
+    if let Some(id) = ids.first() {
+        return if id.ends_with("000") { 0 } else { 2 };
+    }
+    let words: Vec<&str> = name.split(|c: char| !c.is_ascii_alphanumeric()).collect();
+    let update_version = words.iter().any(|w| w.strip_prefix('v').is_some_and(|v| !v.is_empty() && v != "0" && v.chars().all(|c| c.is_ascii_digit())));
+    if update_version || words.iter().any(|w| matches!(*w, "upd" | "update" | "dlc" | "patch" | "addon")) {
+        return 2;
+    }
+    if words.iter().any(|w| matches!(*w, "base" | "v0")) { 0 } else { 1 }
+}
 
 fn err(e: impl std::fmt::Display) -> String {
     e.to_string()
@@ -70,7 +91,9 @@ pub fn launch_target(dir: &Path, name: &str) -> Result<PathBuf, String> {
     for wanted in PRIORITY {
         let mut hits = all.iter().filter(|p| ext(p) == *wanted);
         let pick = if LARGEST_WINS.contains(wanted) {
-            hits.max_by_key(|p| p.metadata().map(|m| m.len()).unwrap_or(0))
+            // The file named as the base game, else the biggest (base games
+            // are usually larger than their updates and DLC).
+            hits.min_by_key(|p| (switch_role(p), std::cmp::Reverse(p.metadata().map(|m| m.len()).unwrap_or(0))))
         } else {
             hits.next()
         };
@@ -115,6 +138,19 @@ mod tests {
     fn switch_picks_base_game_and_ps3_picks_eboot() {
         let d = tree("nsp", &[("Base.nsp", 100), ("Update.nsp", 10)]);
         assert_eq!(launch_target(&d, "x").unwrap(), d.join("Base.nsp"));
+        // An update bigger than the base game: the names decide.
+        let d = tree(
+            "nsp-ids",
+            &[
+                ("LEGO Horizon [0100D8A01C2D2000][v0].nsp", 50),
+                ("LEGO Horizon [0100D8A01C2D2800][v262144].nsp", 90),
+                ("LEGO Horizon DLC [0100D8A01C2D3001].nsp", 5),
+                ("LEGO Horizon DLC [0100D8A01C2D3002].nsp", 5),
+            ],
+        );
+        assert_eq!(launch_target(&d, "x").unwrap(), d.join("LEGO Horizon [0100D8A01C2D2000][v0].nsp"));
+        let d = tree("nsp-tags", &[("Game [UPD].nsp", 90), ("Game.nsp", 50), ("Game [DLC].nsp", 5)]);
+        assert_eq!(launch_target(&d, "x").unwrap(), d.join("Game.nsp"));
         let d = tree("ps3", &[("G/PS3_GAME/USRDIR/EBOOT.BIN", 5), ("G/PS3_DISC.SFB", 1)]);
         assert_eq!(launch_target(&d, "x").unwrap(), d.join("G/PS3_GAME/USRDIR/EBOOT.BIN"));
     }
