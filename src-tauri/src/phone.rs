@@ -406,6 +406,11 @@ fn pads_remove(id: u64) {
     PADS.lock().expect("pads").retain(|p| p.0 != id);
 }
 
+/// Virtual controllers (Wi-Fi phones) currently plugged.
+pub fn virtual_count() -> usize {
+    PADS.lock().expect("pads").iter().filter(|p| p.2.is_some()).count()
+}
+
 /// RetroTogether: before a game starts, recreate the virtual controllers in
 /// player order, so the emulator numbers them J1, J2… (it assigns ports in
 /// the order controllers appeared).

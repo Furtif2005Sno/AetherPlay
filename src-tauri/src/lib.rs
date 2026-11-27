@@ -306,8 +306,16 @@ async fn launch(app: AppHandle, rom_id: u64, fullscreen: bool) -> Result<LaunchR
             let (emu_id, exe_path) = (emu.id.clone(), PathBuf::from(exe));
             let save_dir = emu.save_dirs(exe, Some(&target), &vars, &cfg.save_dirs).into_iter().next();
             let overrides = cfg.player_overrides.clone();
+            let virtual_pads = phone::virtual_count();
             let res = tauri::async_runtime::spawn_blocking(move || {
                 let mut found = controller::detect(&lib)?;
+                // A phone linked by Wi-Fi plays through its virtual controller and
+                // drops its Bluetooth one, which Windows may still list: Bluetooth
+                // phone controllers go after the others, or the idle one took
+                // player 1 and the phone drove player 2.
+                if virtual_pads > 0 {
+                    found.pads.sort_by_key(|p| p.name == "AetherPlay Manette");
+                }
                 // Player numbers chosen in the settings for Bluetooth phones: move
                 // their controller to that place in the order (configured emulators
                 // and the number shown on the phone follow).
