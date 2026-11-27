@@ -160,6 +160,80 @@
       return new Response(empty ? null : res.body, { status: res.status, headers: res.headers });
     };
   }
+  // Update pop-up: AetherPlay found a newer version (updater.rs). Nothing is
+  // installed until "Installer et redémarrer" is chosen; "Plus tard" waits
+  // for the next check. Works with mouse, keyboard and controller (A clicks
+  // the focused button, B / Escape means later, left / right switch).
+  {
+    const style = `
+      #aep-update{position:fixed;inset:0;z-index:2147483000;display:flex;align-items:center;justify-content:center;
+        background:var(--r-color-overlay-scrim-strong,rgba(0,0,0,.6));font-family:var(--r-font-family-sans,system-ui,sans-serif)}
+      #aep-update .box{width:min(440px,90vw);padding:24px;border-radius:var(--r-radius-card,16px);
+        background:var(--r-color-bg-elevated,#17141f);color:var(--r-color-fg,#fff);border:1px solid var(--r-color-border,#2b2735);
+        box-shadow:0 20px 60px rgba(0,0,0,.5)}
+      #aep-update h2{margin:0 0 8px;font-size:20px;color:var(--r-color-fg-heading,#fff)}
+      #aep-update p{margin:0 0 16px;color:var(--r-color-fg-secondary,#cfc9dc);line-height:1.45}
+      #aep-update .bar{height:6px;border-radius:999px;background:var(--r-color-surface,#2b2735);overflow:hidden;margin:0 0 16px;display:none}
+      #aep-update .bar i{display:block;height:100%;width:0;background:var(--r-color-brand-primary,#8b5cf6);transition:width .2s}
+      #aep-update .row{display:flex;gap:10px;justify-content:flex-end}
+      #aep-update button{font:inherit;font-weight:600;padding:9px 16px;border-radius:var(--r-radius-pill,999px);cursor:pointer;
+        border:1px solid var(--r-color-border-strong,#3a3546);background:transparent;color:var(--r-color-fg,#fff)}
+      #aep-update button.primary{background:var(--r-color-brand-primary,#8b5cf6);border-color:transparent;color:#fff}
+      #aep-update button:focus-visible,#aep-update button:focus{outline:3px solid var(--r-color-brand-primary,#8b5cf6);outline-offset:2px}
+      #aep-update button:disabled{opacity:.5;cursor:default}`;
+    let shown = false;
+    const show = (offer) => {
+      if (shown || !offer) return;
+      shown = true;
+      const root = document.createElement("div");
+      root.id = "aep-update";
+      root.innerHTML = `<style>${style}</style><div class="box" role="dialog" aria-modal="true" aria-labelledby="aep-update-title">
+        <h2 id="aep-update-title">Mise à jour disponible</h2>
+        <p>AetherPlay ${offer.version} est disponible (version actuelle : ${offer.current}). L'installation prend une minute, puis AetherPlay redémarre.</p>
+        <div class="bar"><i></i></div>
+        <div class="row"><button class="later">Plus tard</button><button class="primary install">Installer et redémarrer</button></div></div>`;
+      document.body.appendChild(root);
+      const later = root.querySelector(".later");
+      const install = root.querySelector(".install");
+      const text = root.querySelector("p");
+      const bar = root.querySelector(".bar");
+      const close = () => { root.remove(); shown = false; };
+      later.onclick = () => { tauri().core.invoke("update_later"); close(); };
+      install.onclick = () => {
+        later.disabled = install.disabled = true;
+        text.textContent = "Téléchargement de la mise à jour…";
+        bar.style.display = "block";
+        tauri().core.invoke("update_install").catch((e) => {
+          text.textContent = "La mise à jour a échoué : " + e;
+          later.disabled = false;
+          later.textContent = "Fermer";
+        });
+      };
+      // Controller / keyboard: keep focus inside, left/right switch, B or Escape = later.
+      root.addEventListener("keydown", (e) => {
+        if (e.key === "Escape" && !later.disabled) later.click();
+        else if (e.key === "ArrowLeft") later.focus();
+        else if (e.key === "ArrowRight") install.focus();
+        else if (e.key !== "Enter" && e.key !== " ") return;
+        else return;
+        e.preventDefault();
+        e.stopPropagation();
+      }, true);
+      install.focus();
+    };
+    const start = () => {
+      const t = tauri();
+      t.event.listen("aep-update", ({ payload }) => show(payload));
+      t.event.listen("aep-update-progress", ({ payload }) => {
+        const fill = document.querySelector("#aep-update .bar i");
+        if (fill && payload.total) fill.style.width = `${Math.round((payload.done / payload.total) * 100)}%`;
+      });
+      // Found before this page loaded (start-up, reload).
+      t.core.invoke("update_status").then(show).catch(() => {});
+    };
+    if (document.readyState === "loading") window.addEventListener("DOMContentLoaded", start, { once: true });
+    else start();
+  }
   const os = navigator.userAgent.includes("Mac")
     ? "darwin"
     : navigator.userAgent.includes("Windows")
@@ -167,7 +241,7 @@
       : "linux";
 
   window.rommNative = {
-    shellVersion: "AetherPlay 0.4.1",
+    shellVersion: "AetherPlay 0.4.2",
     os,
     capabilities: ["launch-stage", "platform-support-all", "save-sync", "multi-disc", "launch-fullscreen"],
     launch: (request) => tauri().core.invoke("native_launch", { request }),

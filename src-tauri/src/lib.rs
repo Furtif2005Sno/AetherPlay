@@ -596,6 +596,24 @@ async fn proxy_upload(app: AppHandle, request: tauri::ipc::Request<'_>) -> Resul
     }))
 }
 
+/// The update to offer in the pop-up, if any.
+#[tauri::command]
+fn update_status() -> Option<serde_json::Value> {
+    updater::status()
+}
+
+/// "Plus tard" in the update pop-up.
+#[tauri::command]
+fn update_later() {
+    updater::postpone();
+}
+
+/// "Installer et redémarrer" in the update pop-up.
+#[tauri::command]
+async fn update_install(app: AppHandle) -> Result<(), String> {
+    updater::install(&app).await
+}
+
 /// Size of the cover / screenshot cache (bytes).
 #[tauri::command]
 fn image_cache_size(app: AppHandle) -> u64 {
@@ -695,6 +713,9 @@ pub fn run() {
             image_cache_size,
             image_cache_clear,
             proxy_upload,
+            update_status,
+            update_later,
+            update_install,
             install_vigem
         ])
         .run(tauri::generate_context!())
