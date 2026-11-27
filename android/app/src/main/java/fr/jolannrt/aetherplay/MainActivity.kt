@@ -96,6 +96,8 @@ class MainActivity : ComponentActivity() {
             val linkStatusNow by link.status.collectAsState()
             // Bluetooth only (no Wi-Fi link): AetherPlay sends game and player over Bluetooth.
             val btInfo by hid.info.collectAsState()
+            val btEvents by hid.events.collectAsState()
+            var btExtended by remember { mutableStateOf(hid.extended) }
             val wifiUp = linkStatusNow is Link.Status.Connected
             val btGame = btInfo?.platform?.let { fr.jolannrt.aetherplay.net.Game(it, btInfo?.name ?: it, null) }
             val game = preview?.let { fr.jolannrt.aetherplay.net.Game(it, "Aperçu : $it", null) }
@@ -204,6 +206,9 @@ class MainActivity : ComponentActivity() {
                     },
                     onRetryBluetooth = { startBluetooth(restart = true) },
                     onOpenPad = { showPad = true },
+                    btEvents = btEvents,
+                    btExtended = btExtended,
+                    onBtExtended = { hid.extended = it; btExtended = it },
                 )
             }
         }

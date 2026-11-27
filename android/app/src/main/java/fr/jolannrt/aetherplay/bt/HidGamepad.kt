@@ -41,6 +41,27 @@ class HidGamepad(private val context: Context) {
     private val _info = MutableStateFlow<Info?>(null)
     val info: StateFlow<Info?> = _info
 
+    /** Last Bluetooth events (shown in the app, to understand a dropping link). */
+    private val _events = MutableStateFlow<List<String>>(emptyList())
+    val events: StateFlow<List<String>> = _events
+
+    private fun event(text: String) {
+        val time = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.FRANCE).format(java.util.Date())
+        _events.value = (_events.value + "$time  $text").takeLast(12)
+    }
+
+    /**
+     * With the AetherPlay channel (game + player over Bluetooth) or as a plain
+     * controller (the 0.4.2 one). Changing it needs the computer to pair again.
+     */
+    var extended: Boolean
+        get() = prefs().getBoolean("extended", true)
+        set(value) {
+            prefs().edit().putBoolean("extended", value).apply()
+            stop()
+            start()
+        }
+
     private val adapter: BluetoothAdapter? =
         (context.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager)?.adapter
     private var hid: BluetoothHidDevice? = null
@@ -53,21 +74,30 @@ class HidGamepad(private val context: Context) {
     private val callback = object : BluetoothHidDevice.Callback() {
         override fun onAppStatusChanged(pluggedDevice: BluetoothDevice?, registered: Boolean) {
             if (!registered) {
+                event("profil manette désactivé")
                 _status.value = Status.Unavailable("Mode manette Bluetooth refusé par le téléphone")
                 return
             }
+            event(if (extended) "manette prête (avec infos AetherPlay)" else "manette prête (simple)")
             _status.value = Status.Ready
             // Reconnect to the computer used last time, or to the one that woke us.
             val target = pluggedDevice ?: lastHost()
             if (target != null) hid?.connect(target)
         }
 
-        // AetherPlay recognises the phone among the controllers by reading this signature.
+        // The computer asks for a report: the controller state (asked by some
+        // hosts when connecting: refusing it can make them drop the link), or
+        // the signature AetherPlay reads to recognise the phone.
         override fun onGetReport(device: BluetoothDevice, type: Byte, id: Byte, bufferSize: Int) {
-            if (id.toInt() == SIGNATURE_REPORT) {
-                hid?.replyReport(device, type, id, SIGNATURE)
-            } else {
-                hid?.reportError(device, BluetoothHidDevice.ERROR_RSP_INVALID_RPT_ID)
+            event("le PC demande le rapport $id")
+            when (id.toInt()) {
+                0, REPORT_ID -> hid?.replyReport(device, type, REPORT_ID.toByte(), last.hidReport())
+                SIGNATURE_REPORT -> if (extended) {
+                    hid?.replyReport(device, type, id, SIGNATURE)
+                } else {
+                    hid?.reportError(device, BluetoothHidDevice.ERROR_RSP_INVALID_RPT_ID)
+                }
+                else -> hid?.reportError(device, BluetoothHidDevice.ERROR_RSP_INVALID_RPT_ID)
             }
         }
 
@@ -80,14 +110,21 @@ class HidGamepad(private val context: Context) {
             if (reportId.toInt() == INFO_REPORT) readInfo(data)
         }
 
+        override fun onVirtualCableUnplug(device: BluetoothDevice) {
+            event("le PC a oublié la manette (association supprimée)")
+        }
+
         override fun onConnectionStateChanged(device: BluetoothDevice, state: Int) {
             when (state) {
                 BluetoothProfile.STATE_CONNECTED -> {
                     host = device
                     saveHost(device)
+                    event("connectée à ${device.name ?: device.address}")
                     _status.value = Status.Connected(device.name ?: device.address)
                 }
+                BluetoothProfile.STATE_CONNECTING -> event("connexion à ${device.name ?: device.address}…")
                 BluetoothProfile.STATE_DISCONNECTED -> {
+                    event("déconnectée de ${device.name ?: device.address}")
                     if (host == device) host = null
                     _info.value = null
                     if (_status.value is Status.Connected) _status.value = Status.Ready
@@ -117,7 +154,7 @@ class HidGamepad(private val context: Context) {
                 hid = proxy as BluetoothHidDevice
                 val sdp = BluetoothHidDeviceAppSdpSettings(
                     NAME, "Manette AetherPlay", "AetherPlay",
-                    BluetoothHidDevice.SUBCLASS2_GAMEPAD, DESCRIPTOR,
+                    BluetoothHidDevice.SUBCLASS2_GAMEPAD, if (extended) DESCRIPTOR else BASE_DESCRIPTOR,
                 )
                 // Steady reports channel: Windows keeps the link instead of dropping it.
                 val qos = BluetoothHidDeviceAppQosSettings(
@@ -164,7 +201,7 @@ class HidGamepad(private val context: Context) {
         }, 2, 2, TimeUnit.SECONDS)
     }
 
-    /** Info report: version, player (0 = unknown), platform (ASCII, 24 bytes), game name (UTF-8). */
+    /** Info report: version, player (0 = unknown), platform (ASCII, 16 bytes), game name (UTF-8, 13 bytes). */
     private fun readInfo(data: ByteArray) {
         // Some stacks keep the report id in front.
         val d = if (data.size == INFO_SIZE + 1 && data[0].toInt() == INFO_REPORT) data.copyOfRange(1, data.size) else data
@@ -175,7 +212,9 @@ class HidGamepad(private val context: Context) {
             val end = bytes.indexOf(0).let { if (it < 0) bytes.size else it }
             return String(bytes, 0, end, Charsets.UTF_8).takeIf { it.isNotEmpty() }
         }
-        _info.value = Info(d[1].toInt() and 0xFF, text(2, 24), text(26, INFO_SIZE - 26))
+        val info = Info(d[1].toInt() and 0xFF, text(2, 16), text(18, INFO_SIZE - 18))
+        if (info != _info.value) event("AetherPlay : joueur ${info.player}, ${info.platform ?: "menus"}")
+        _info.value = info
     }
 
     private fun prefs() = context.getSharedPreferences("bt", Context.MODE_PRIVATE)
@@ -184,22 +223,18 @@ class HidGamepad(private val context: Context) {
         prefs().getString("host", null)?.let { addr -> runCatching { adapter?.getRemoteDevice(addr) }.getOrNull() }
 
     companion object {
-        /** Name the computer shows; AetherPlay recognises the controller by it. */
+        /** HID service name (the computer lists the phone under the phone's own name). */
         const val NAME = "AetherPlay Manette"
         private const val REPORT_ID = 1
         /** Output report: AetherPlay -> phone (player number, running game). */
         private const val INFO_REPORT = 2
-        private const val INFO_SIZE = 63
+        private const val INFO_SIZE = 31
         /** Feature report read by AetherPlay to recognise this controller. */
         private const val SIGNATURE_REPORT = 3
         val SIGNATURE = "AETHERPLAY-PAD01".toByteArray(Charsets.US_ASCII)
 
-        /**
-         * Gamepad with 17 buttons in W3C standard order (so browsers and RomM's
-         * interface read them right without a mapping) and 4 axes: X/Y left
-         * stick, Rx/Ry right stick, each -127..127.
-         */
-        val DESCRIPTOR = byteArrayOf(
+        /** The controller part, common to both descriptors. */
+        private val PAD = byteArrayOf(
             0x05, 0x01, //       Usage Page (Generic Desktop)
             0x09, 0x05, //       Usage (Game Pad)
             0xA1.toByte(), 0x01, // Collection (Application)
@@ -225,6 +260,17 @@ class HidGamepad(private val context: Context) {
             0x75, 0x08, //         Report Size (8)
             0x95.toByte(), 0x04, // Report Count (4)
             0x81.toByte(), 0x02, // Input (Data, Variable, Absolute)
+        )
+
+        /**
+         * Gamepad with 17 buttons in W3C standard order (so browsers and RomM's
+         * interface read them right without a mapping) and 4 axes: X/Y left
+         * stick, Rx/Ry right stick, each -127..127.
+         */
+        val BASE_DESCRIPTOR = PAD + byteArrayOf(0xC0.toByte())
+
+        /** Same controller plus the AetherPlay channel. */
+        val DESCRIPTOR = PAD + byteArrayOf(
             // AetherPlay channel (vendor page): signature to read, info to receive.
             0x06, 0x00, 0xFF.toByte(), // Usage Page (Vendor 0xFF00)
             0x15, 0x00, //         Logical Minimum (0)

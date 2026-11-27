@@ -24,6 +24,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -56,6 +57,9 @@ fun ConnectScreen(
     onMakeVisible: () -> Unit,
     onRetryBluetooth: () -> Unit,
     onOpenPad: () -> Unit,
+    btEvents: List<String> = emptyList(),
+    btExtended: Boolean = true,
+    onBtExtended: (Boolean) -> Unit = {},
 ) {
     Row(
         Modifier
@@ -127,7 +131,7 @@ fun ConnectScreen(
             when (bluetooth) {
                 is HidGamepad.Status.Connected -> Line("Manette connectée à ${bluetooth.host}", Accent)
                 HidGamepad.Status.Ready -> {
-                    Line("Prête. Première fois : rends le téléphone visible, puis sur l'ordinateur ouvre les réglages Bluetooth > Ajouter un appareil > « ${HidGamepad.NAME} ».", Muted)
+                    Line("Prête. Première fois : rends le téléphone visible, puis sur l'ordinateur ouvre les réglages Bluetooth > Ajouter un appareil et choisis ce téléphone (il apparaît sous son propre nom).", Muted)
                     Spacer(Modifier.height(8.dp))
                     OutlinedButton(onClick = onMakeVisible) { Text("Rendre le téléphone visible") }
                 }
@@ -137,6 +141,23 @@ fun ConnectScreen(
                     Spacer(Modifier.height(8.dp))
                     OutlinedButton(onClick = onRetryBluetooth) { Text("Réessayer") }
                 }
+            }
+            Spacer(Modifier.height(12.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("Infos AetherPlay par Bluetooth", color = Color.White, fontSize = 14.sp)
+                    Text(
+                        "Console du jeu et numéro de joueur sans Wi-Fi. Si la liaison décroche, désactive : manette simple. " +
+                            "Après un changement, supprime le téléphone des appareils Bluetooth de l'ordinateur et associe-le de nouveau.",
+                        color = Muted, fontSize = 12.sp,
+                    )
+                }
+                Switch(checked = btExtended, onCheckedChange = onBtExtended)
+            }
+            if (btEvents.isNotEmpty()) {
+                Spacer(Modifier.height(10.dp))
+                Text("Journal Bluetooth", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                btEvents.reversed().forEach { Text(it, color = Muted, fontSize = 11.sp) }
             }
             Spacer(Modifier.height(20.dp))
             Button(

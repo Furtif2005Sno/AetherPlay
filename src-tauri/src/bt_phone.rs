@@ -5,8 +5,9 @@
 //! The app's HID descriptor (android/…/HidGamepad.kt) has two extra reports:
 //! * feature report 3: a 16-byte signature, read to recognise the phone among
 //!   the computer's controllers;
-//! * output report 2: version, player number, platform slug (24 bytes ASCII),
-//!   game name (UTF-8): the phone switches to that console's layout.
+//! * output report 2 (31 bytes): version, player number, platform slug (16
+//!   bytes ASCII), game name (13 bytes UTF-8): the phone switches to that
+//!   console's layout. Sent only when it changes (and once to a new phone).
 //!
 //! Everything runs on one thread (hidapi handles are not `Send`); the rest of
 //! AetherPlay talks to it through a channel.
@@ -22,7 +23,7 @@ use tauri::AppHandle;
 const SIGNATURE: &[u8; 16] = b"AETHERPLAY-PAD01";
 const SIGNATURE_REPORT: u8 = 3;
 const INFO_REPORT: u8 = 2;
-const INFO_SIZE: usize = 63;
+const INFO_SIZE: usize = 31;
 
 enum Command {
     /// Player numbers from the emulator's controller order: HID paths, in order.
@@ -64,6 +65,8 @@ struct Phone {
     path: String,
     device: HidDevice,
     player: u8,
+    /// Last report sent, to send only changes.
+    sent: Vec<u8>,
 }
 
 /// The info report: [id, version, player, platform…, name…].
@@ -74,13 +77,13 @@ fn report(player: u8, game: &Option<(String, String)>) -> Vec<u8> {
     r[2] = player;
     if let Some((platform, name)) = game {
         let p = platform.as_bytes();
-        r[3..3 + p.len().min(23)].copy_from_slice(&p[..p.len().min(23)]);
+        r[3..3 + p.len().min(15)].copy_from_slice(&p[..p.len().min(15)]);
         // Cut the name on a character boundary.
-        let mut end = name.len().min(INFO_SIZE - 26);
+        let mut end = name.len().min(INFO_SIZE - 18);
         while !name.is_char_boundary(end) {
             end -= 1;
         }
-        r[27..27 + end].copy_from_slice(&name.as_bytes()[..end]);
+        r[19..19 + end].copy_from_slice(&name.as_bytes()[..end]);
     }
     r
 }
@@ -134,7 +137,7 @@ pub fn spawn(app: AppHandle) {
                 match api.open_path(&c) {
                     Ok(device) if is_phone(&device) => {
                         shell::log(&app, "manette Android connectée en Bluetooth");
-                        phones.push(Phone { path: path.clone(), device, player: 0 });
+                        phones.push(Phone { path: path.clone(), device, player: 0, sent: Vec::new() });
                     }
                     _ => {
                         others.insert(path.clone());
@@ -162,9 +165,11 @@ pub fn spawn(app: AppHandle) {
                 p.player = *n;
             }
             *PLAYERS.lock().expect("bt players") = numbers;
-            // Resent every few seconds: a phone that reconnected gets it too.
-            for p in &phones {
-                let _ = p.device.write(&report(p.player, &game));
+            for p in &mut phones {
+                let r = report(p.player, &game);
+                if r != p.sent && p.device.write(&r).is_ok() {
+                    p.sent = r;
+                }
             }
         }
     });
@@ -177,16 +182,17 @@ mod tests {
     #[test]
     fn info_report_layout() {
         let r = report(2, &Some(("snes".into(), "Super Mario Kart".into())));
-        assert_eq!(r.len(), 64);
+        assert_eq!(r.len(), 32);
         assert_eq!(&r[..3], &[INFO_REPORT, 1, 2]);
         assert_eq!(&r[3..7], b"snes");
         assert_eq!(r[7], 0);
-        assert_eq!(&r[27..43], b"Super Mario Kart");
+        // 13 bytes of name.
+        assert_eq!(&r[19..32], b"Super Mario K");
         // Menus: no platform.
         assert_eq!(report(1, &None)[3], 0);
         // Long names are cut on a character boundary.
         let long = "é".repeat(40);
         let r = report(1, &Some(("nds".into(), long)));
-        assert!(std::str::from_utf8(&r[27..].split(|b| *b == 0).next().unwrap().to_vec()).is_ok());
+        assert!(std::str::from_utf8(&r[19..].split(|b| *b == 0).next().unwrap().to_vec()).is_ok());
     }
 }
