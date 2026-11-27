@@ -132,8 +132,11 @@ const PHONE_MAPPING: &str = "a:b0,b:b1,x:b2,y:b3,leftshoulder:b4,rightshoulder:b
 back:b8,start:b9,leftstick:b10,rightstick:b11,dpup:b12,dpdown:b13,dpleft:b14,dpright:b15,guide:b16,\
 leftx:a0,lefty:a1,rightx:a2,righty:a3";
 
+/// Name SDL gives the Android app's Bluetooth controller (from its mapping).
+pub const PHONE_NAME: &str = "AetherPlay Manette";
+
 pub fn phone_mapping(guid: &str) -> String {
-    format!("{guid},AetherPlay Manette,{PHONE_MAPPING},")
+    format!("{guid},{PHONE_NAME},{PHONE_MAPPING},")
 }
 
 /// What SDL sees: the gamepads, and SDL mappings for Android controllers

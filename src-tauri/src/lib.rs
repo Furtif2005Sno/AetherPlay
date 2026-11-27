@@ -307,21 +307,32 @@ async fn launch(app: AppHandle, rom_id: u64, fullscreen: bool) -> Result<LaunchR
             let save_dir = emu.save_dirs(exe, Some(&target), &vars, &cfg.save_dirs).into_iter().next();
             let overrides = cfg.player_overrides.clone();
             let virtual_pads = phone::virtual_count();
+            let pad_order = cfg.pad_order.clone();
             let res = tauri::async_runtime::spawn_blocking(move || {
                 let mut found = controller::detect(&lib)?;
+                // A phone whose app is closed may still be listed: its idle
+                // controller would take a player's place.
+                let before = found.pads.len();
+                found.pads.retain(|p| p.name != controller::PHONE_NAME || bt_phone::answers(&p.path));
+                let idle_phones = before - found.pads.len();
                 // A phone linked by Wi-Fi plays through its virtual controller and
                 // drops its Bluetooth one, which Windows may still list: Bluetooth
                 // phone controllers go after the others, or the idle one took
                 // player 1 and the phone drove player 2.
                 if virtual_pads > 0 {
-                    found.pads.sort_by_key(|p| p.name == "AetherPlay Manette");
+                    found.pads.sort_by_key(|p| p.name == controller::PHONE_NAME);
+                }
+                // Player order chosen in the settings for every controller (by
+                // name; same names keep their order, unknown ones come last).
+                if !pad_order.is_empty() {
+                    found.pads.sort_by_key(|p| pad_order.iter().position(|n| *n == p.name).unwrap_or(usize::MAX));
                 }
                 // Player numbers chosen in the settings for Bluetooth phones: move
                 // their controller to that place in the order (configured emulators
                 // and the number shown on the phone follow).
                 let bt_names = bt_link::connected_phones();
                 let mut phone_at: Vec<usize> =
-                    found.pads.iter().enumerate().filter(|(_, p)| p.name == "AetherPlay Manette").map(|(i, _)| i).collect();
+                    found.pads.iter().enumerate().filter(|(_, p)| p.name == controller::PHONE_NAME).map(|(i, _)| i).collect();
                 for (name, pos) in bt_names.iter().zip(phone_at.clone()) {
                     if let Some(want) = overrides.get(name).map(|n| (*n as usize).saturating_sub(1))
                         && want < found.pads.len()
@@ -358,13 +369,16 @@ async fn launch(app: AppHandle, rom_id: u64, fullscreen: bool) -> Result<LaunchR
                     _ => None,
                 }
                 .filter(|s| !s.is_empty());
-                Ok::<_, String>((found.phone_mappings, players, bt_players))
+                Ok::<_, String>((found.phone_mappings, players, bt_players, idle_phones))
             })
             .await
             .map_err(|e| e.to_string())
             .and_then(|r| r);
             match res {
-                Ok((mappings, applied, bt_players)) => {
+                Ok((mappings, applied, bt_players, idle_phones)) => {
+                    if idle_phones > 0 {
+                        shell::log(&app, &format!("manette : {idle_phones} manette(s) Android Bluetooth inactive(s) (app fermée), ignorée(s)"));
+                    }
                     relay::publish_players(app.clone(), client.clone(), bt_players);
                     if !mappings.is_empty() {
                         shell::log(&app, "manette : manette Android (Bluetooth) détectée");
@@ -635,6 +649,41 @@ fn switch_key_dirs(app: &AppHandle) -> Vec<(String, String, PathBuf)> {
         .collect()
 }
 
+/// Controllers as emulators see them (SDL), in the player order used at the
+/// next launch: `{ name, phone, idle }` (`idle`: a phone whose app is closed).
+#[tauri::command]
+async fn detect_controllers(app: AppHandle) -> Result<Vec<serde_json::Value>, String> {
+    let cfg = config::load(&app);
+    let retroarch = cfg.emulator_paths.get("retroarch").map(PathBuf::from);
+    let lib = cfg
+        .emulator_paths
+        .values()
+        .find_map(|exe| controller::find_sdl(std::path::Path::new(exe), retroarch.as_deref()))
+        .ok_or("SDL3 introuvable : installe Eden ou Eglantine depuis AetherPlay.")?;
+    let order = cfg.pad_order.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut pads = controller::detect(&lib)?.pads;
+        pads.sort_by_key(|p| order.iter().position(|n| *n == p.name).unwrap_or(usize::MAX));
+        Ok(pads
+            .iter()
+            .map(|p| {
+                let phone = p.name == controller::PHONE_NAME;
+                json!({ "name": p.name, "phone": phone, "idle": phone && !bt_phone::answers(&p.path) })
+            })
+            .collect())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Player order of the controllers (names, J1 first); empty: automatic.
+#[tauri::command]
+fn set_pad_order(app: AppHandle, order: Vec<String>) -> Result<(), String> {
+    let mut cfg = config::load(&app);
+    cfg.pad_order = order;
+    config::save(&app, &cfg)
+}
+
 /// Switch emulators set up here and whether they have decryption keys.
 #[tauri::command]
 fn switch_keys_status(app: AppHandle) -> Vec<serde_json::Value> {
@@ -863,7 +912,9 @@ pub fn run() {
             update_install,
             install_vigem,
             switch_keys_status,
-            import_switch_keys
+            import_switch_keys,
+            detect_controllers,
+            set_pad_order
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

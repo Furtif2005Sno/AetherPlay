@@ -94,6 +94,36 @@ fn is_phone(device: &HidDevice) -> bool {
     matches!(device.get_feature_report(&mut buf), Ok(n) if n >= 17 && &buf[1..17] == SIGNATURE)
 }
 
+/// Whether the phone controller at HID `path` answers the computer's request
+/// for its state, i.e. the AetherPlay app runs on the phone. Windows may keep
+/// listing the controller of a phone whose app is closed; it then took a
+/// player's place. When the device cannot even be opened, it is kept.
+#[cfg(windows)]
+pub fn answers(path: &str) -> bool {
+    let path = path.to_string();
+    let (tx, rx) = mpsc::channel();
+    std::thread::spawn(move || {
+        let result = (|| {
+            let api = HidApi::new().ok()?;
+            let device = api.open_path(&CString::new(path).ok()?).ok()?;
+            let mut buf = [0u8; 8];
+            buf[0] = 1;
+            Some(device.get_input_report(&mut buf).is_ok())
+        })();
+        let _ = tx.send(result);
+    });
+    match rx.recv_timeout(Duration::from_millis(2500)) {
+        Ok(Some(alive)) => alive,
+        Ok(None) => true,
+        Err(_) => false,
+    }
+}
+
+#[cfg(not(windows))]
+pub fn answers(_path: &str) -> bool {
+    true
+}
+
 pub fn spawn(app: AppHandle) {
     let (tx, rx) = mpsc::channel();
     *CHANNEL.lock().expect("bt channel") = Some(tx);

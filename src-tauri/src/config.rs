@@ -36,6 +36,9 @@ pub struct Config {
     /// Player number chosen for a Bluetooth phone (by its Bluetooth name).
     #[serde(default)]
     pub player_overrides: HashMap<String, u8>,
+    /// Controller names in the player order chosen in the settings (J1 first).
+    #[serde(default)]
+    pub pad_order: Vec<String>,
 }
 
 fn default_true() -> bool {
@@ -56,6 +59,7 @@ impl Default for Config {
             dual_screen: Vec::new(),
             romm_device_id: None,
             player_overrides: HashMap::new(),
+            pad_order: Vec::new(),
         }
     }
 }

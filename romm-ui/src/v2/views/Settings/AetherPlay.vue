@@ -34,6 +34,32 @@ interface DetectedPad {
   phone: boolean;
 }
 const detected = ref<DetectedPad[]>([]);
+/** Controllers as emulators see them, in player order (J1 first). */
+const order = ref<{ name: string; phone: boolean; idle: boolean }[]>([]);
+const orderState = ref<"idle" | "loading" | "error">("idle");
+async function loadOrder() {
+  orderState.value = "loading";
+  try {
+    order.value = await app.detectControllers();
+    orderState.value = "idle";
+  } catch (e) {
+    error.value = String(e);
+    orderState.value = "error";
+  }
+}
+async function movePad(i: number, by: number) {
+  const list = [...order.value];
+  const j = i + by;
+  if (j < 0 || j >= list.length) return;
+  const [moved] = list.splice(i, 1);
+  if (moved) list.splice(j, 0, moved);
+  order.value = list;
+  await run(() => app.setPadOrder(list.map((p) => p.name)));
+}
+async function resetOrder() {
+  await run(() => app.setPadOrder([]));
+  await loadOrder();
+}
 
 const refreshPhone = async () => {
   phone.value = await app.phoneStatus();
@@ -331,6 +357,27 @@ onUnmounted(() => {
           </div>
         </div>
       </div>
+      <div class="aep-row">
+        <div class="aep-row__info">
+          <div class="aep-row__title">Ordre des joueurs</div>
+          <div class="aep-muted">
+            Toutes les manettes, dans l'ordre appliqué au prochain lancement (Eden, Eglantine, PCSX2, DuckStation,
+            Dolphin). Une manette Android dont l'app est fermée est ignorée automatiquement.
+          </div>
+          <div v-for="(p, i) in order" :key="p.name + i" class="aep-order">
+            <span class="aep-tag">{{ p.idle ? "ignorée" : "J" + (i + 1 - order.slice(0, i).filter((x) => x.idle).length) }}</span>
+            <span :class="{ 'aep-muted': p.idle }">{{ p.name }}{{ p.phone ? " (Android, Bluetooth)" : "" }}</span>
+            <RBtn size="x-small" variant="text" :disabled="i === 0" @click="movePad(i, -1)">↑</RBtn>
+            <RBtn size="x-small" variant="text" :disabled="i === order.length - 1" @click="movePad(i, 1)">↓</RBtn>
+          </div>
+        </div>
+        <div class="aep-row__actions">
+          <RBtn size="small" variant="outlined" :loading="orderState === 'loading'" @click="loadOrder">
+            {{ order.length ? "Actualiser" : "Afficher les manettes" }}
+          </RBtn>
+          <RBtn v-if="order.length" size="small" variant="text" @click="resetOrder">Ordre automatique</RBtn>
+        </div>
+      </div>
       <div v-for="p in phone.phones" :key="p.id" class="aep-row">
         <div class="aep-row__info">
           <div class="aep-row__title"><span class="aep-tag">J{{ p.player }}</span> {{ p.name }}</div>
@@ -594,6 +641,12 @@ onUnmounted(() => {
 }
 .aep-pad {
   padding: 12px 16px 4px;
+}
+.aep-order {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
 }
 .aep-tag {
   margin-left: 6px;
