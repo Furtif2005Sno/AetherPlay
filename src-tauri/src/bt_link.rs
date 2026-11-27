@@ -124,8 +124,23 @@ mod win {
 
     /// Names of the phones connected to this computer by Bluetooth (major
     /// device class 2 = phone), in Windows' order.
+    /// Kept 10 s: the settings page asks every 2 s, and the Bluetooth stack
+    /// is left alone while a phone is connected as a controller.
     pub fn connected_phones() -> Vec<String> {
-        connected_devices_with_class().into_iter().filter(|(_, _, class)| (class >> 8) & 0x1F == 0x02).map(|(_, n, _)| n).collect()
+        static CACHE: Mutex<Option<(Instant, Vec<String>)>> = Mutex::new(None);
+        let mut cache = CACHE.lock().expect("bt phones");
+        if let Some((at, names)) = cache.as_ref()
+            && at.elapsed() < Duration::from_secs(10)
+        {
+            return names.clone();
+        }
+        let names: Vec<String> = connected_devices_with_class()
+            .into_iter()
+            .filter(|(_, _, class)| (class >> 8) & 0x1F == 0x02)
+            .map(|(_, n, _)| n)
+            .collect();
+        *cache = Some((Instant::now(), names.clone()));
+        names
     }
 
     fn connected_devices_with_class() -> Vec<(u64, String, u32)> {
@@ -264,14 +279,18 @@ mod win {
                 let mut data = WSADATA::default();
                 WSAStartup(0x0202, &mut data);
             }
-            // Devices without the service, tried again after a minute.
+            // Devices without the service: tried once per connection (each try
+            // makes the phone's Bluetooth stack look the service up, which can
+            // disturb the controller link), again after they reconnect.
             let mut tried: HashMap<u64, Instant> = HashMap::new();
             loop {
-                for (addr, _bt_name) in connected_devices() {
+                let devices = connected_devices();
+                tried.retain(|addr, _| devices.iter().any(|(a, _)| a == addr));
+                for (addr, _bt_name) in devices {
                     if LINKS.lock().expect("bt links").iter().any(|(a, _)| *a == addr) {
                         continue;
                     }
-                    if tried.get(&addr).is_some_and(|t| t.elapsed() < Duration::from_secs(60)) {
+                    if tried.contains_key(&addr) {
                         continue;
                     }
                     tried.insert(addr, Instant::now());

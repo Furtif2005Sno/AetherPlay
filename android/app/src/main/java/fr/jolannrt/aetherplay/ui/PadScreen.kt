@@ -7,6 +7,8 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -66,6 +68,7 @@ import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import fr.jolannrt.aetherplay.pad.Tweak
+import fr.jolannrt.aetherplay.pad.BUTTON_COLORS
 import fr.jolannrt.aetherplay.pad.tweaked
 import kotlin.math.hypot
 import kotlin.math.max
@@ -118,7 +121,7 @@ fun PadScreen(
         if (editing) {
             EditPad(layout, tweaks, selected, { selected = it }, onTweaks, buttonStyle)
         } else {
-            Pad(layout.tweaked(tweaks), onState, frame, screenSize, onTouch, buttonStyle)
+            Pad(layout.tweaked(tweaks), onState, frame, screenSize, onTouch, buttonStyle, tweaks.styles())
         }
         Row(
             Modifier
@@ -207,17 +210,45 @@ fun PadScreen(
                     TextButton(onClick = { resize(1f / 1.12f) }) { Text("−", color = Color.White, fontSize = 20.sp) }
                     TextButton(onClick = { resize(1.12f) }) { Text("+", color = Color.White, fontSize = 20.sp) }
                 }
-                // Accessibility: button colours (Origine = the console's, by default).
-                TextButton(onClick = {
-                    val all = ButtonStyle.entries
-                    onButtonStyle(all[(all.indexOf(buttonStyle) + 1) % all.size])
-                }) { Text("Style : ${buttonStyle.label}", color = Color.White) }
+                if (sel == null) {
+                    // Accessibility: button colours (Origine = the console's, by default).
+                    TextButton(onClick = {
+                        val all = ButtonStyle.entries
+                        onButtonStyle(all[(all.indexOf(buttonStyle) + 1) % all.size])
+                    }) { Text("Style : ${buttonStyle.label}", color = Color.White) }
+                } else {
+                    // This control only: its own style, then its own colour.
+                    val t = tweaks[sel] ?: Tweak()
+                    TextButton(onClick = {
+                        val order = listOf<ButtonStyle?>(null) + ButtonStyle.entries
+                        onTweaks(tweaks + (sel to t.copy(style = order[(order.indexOf(t.style) + 1) % order.size])))
+                    }) { Text("Style : ${t.style?.label ?: "comme les autres"}", color = Color.White) }
+                    if (layout.controls.getOrNull(sel) !is Control.Dpad) {
+                        TextButton(onClick = {
+                            val next = BUTTON_COLORS[(BUTTON_COLORS.indexOf(t.color) + 1) % BUTTON_COLORS.size]
+                            // A colour shows with the Origine style.
+                            onTweaks(tweaks + (sel to t.copy(color = next, style = if (next != null) ButtonStyle.ORIGINAL else t.style)))
+                        }) {
+                            Text("Couleur", color = Color.White)
+                            Box(
+                                Modifier
+                                    .padding(start = 6.dp)
+                                    .size(16.dp)
+                                    .background(t.color?.let { Color(it) } ?: Color.Transparent, RoundedCornerShape(50))
+                                    .border(1.5.dp, Color.White, RoundedCornerShape(50)),
+                            )
+                        }
+                    }
+                }
                 TextButton(onClick = { onTweaks(emptyMap()); selected = null }) { Text("Réinitialiser", color = Color.White) }
                 TextButton(onClick = { editing = false; selected = null }) { Text("Terminé", color = accent, fontWeight = FontWeight.Bold) }
             }
         }
     }
 }
+
+private fun Map<Int, Tweak>.styles(): Map<Int, ButtonStyle> =
+    entries.mapNotNull { (i, t) -> t.style?.let { i to it } }.toMap()
 
 /** Customisation: drag a control to move it, the bar below resizes the selected one. */
 @Composable
@@ -230,6 +261,7 @@ private fun EditPad(
     style: ButtonStyle = ButtonStyle.ORIGINAL,
 ) {
     val layout = base.tweaked(tweaks)
+    val styles = tweaks.styles()
     val current by rememberUpdatedState(tweaks)
     val shown by rememberUpdatedState(layout)
     val change by rememberUpdatedState(onTweaks)
@@ -261,10 +293,11 @@ private fun EditPad(
                 },
         ) {
             layout.controls.forEachIndexed { i, ctl ->
+                val st = styles[i] ?: style
                 when (ctl) {
-                    is Control.Button -> drawButton(ctl, 0, false, layout.accent, style)
-                    is Control.Dpad -> drawDpad(ctl, 0, layout.accent, style)
-                    is Control.Stick -> drawStick(ctl, Offset.Zero, layout.accent, style)
+                    is Control.Button -> drawButton(ctl, 0, false, layout.accent, st)
+                    is Control.Dpad -> drawDpad(ctl, 0, layout.accent, st)
+                    is Control.Stick -> drawStick(ctl, Offset.Zero, layout.accent, st)
                 }
                 val (x, y, r) = when (ctl) {
                     is Control.Button -> Triple(ctl.x, ctl.y, if (ctl.pill) ctl.r * 2.3f else ctl.r)
@@ -307,6 +340,8 @@ private fun Pad(
     screenSize: Pair<Int, Int>? = null,
     onTouch: (Float, Float, Boolean) -> Unit = { _, _, _ -> },
     style: ButtonStyle = ButtonStyle.ORIGINAL,
+    /** Per-control styles chosen in Personnaliser (index -> style). */
+    styles: Map<Int, ButtonStyle> = emptyMap(),
 ) {
     val view = LocalView.current
     val liveSize by rememberUpdatedState(screenSize)
@@ -403,11 +438,12 @@ private fun Pad(
                     )
                 }
             }
-            for (ctl in layout.controls) {
+            layout.controls.forEachIndexed { i, ctl ->
+                val st = styles[i] ?: style
                 when (ctl) {
-                    is Control.Button -> drawButton(ctl, pressed, ctl in axisButtons, layout.accent, style)
-                    is Control.Dpad -> drawDpad(ctl, pressed, layout.accent, style)
-                    is Control.Stick -> drawStick(ctl, sticks[ctl.axis] ?: Offset.Zero, layout.accent, style)
+                    is Control.Button -> drawButton(ctl, pressed, ctl in axisButtons, layout.accent, st)
+                    is Control.Dpad -> drawDpad(ctl, pressed, layout.accent, st)
+                    is Control.Stick -> drawStick(ctl, sticks[ctl.axis] ?: Offset.Zero, layout.accent, st)
                 }
             }
         }

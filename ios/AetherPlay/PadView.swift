@@ -7,7 +7,7 @@ import UIKit
 enum Backdrop: String { case controller, cover }
 
 /// How buttons are drawn (Personnaliser > Style): the console's colours by default.
-enum ButtonStyle: String, CaseIterable {
+enum ButtonStyle: String, CaseIterable, Codable {
     case original, contrast, outline
     var label: String {
         switch self {
@@ -231,9 +231,11 @@ private func label(_ ctx: inout GraphicsContext, _ text: String, _ at: CGPoint, 
 
 private func circle(_ c: CGPoint, _ r: CGFloat) -> Path { Path(ellipseIn: CGRect(x: c.x - r, y: c.y - r, width: 2 * r, height: 2 * r)) }
 
-func drawControls(_ ctx: inout GraphicsContext, _ size: CGSize, _ layout: PadLayout, _ t: PadTouches, _ style: ButtonStyle) {
+func drawControls(_ ctx: inout GraphicsContext, _ size: CGSize, _ layout: PadLayout, _ t: PadTouches, _ global: ButtonStyle,
+                  _ styles: [Int: ButtonStyle] = [:]) {
     let accent = Color(argb: layout.accent)
     for (i, c) in layout.controls.enumerated() {
+        let style = styles[i] ?? global
         let pc = controlPoint(c, size)
         switch c {
         case let .button(id, text, _, _, r0, fill, textColor, pill, axis, _):
@@ -406,7 +408,7 @@ struct PadScreen: View {
                             c.draw(Image(uiImage: frame).interpolation(.none), in: r)
                         }
                     }
-                    drawControls(&ctx, size, layout, touches, style)
+                    drawControls(&ctx, size, layout, touches, style, tweaks.compactMapValues { $0.style })
                     if editing, let i = selected, i < layout.controls.count {
                         let c = layout.controls[i]
                         ctx.stroke(circle(CGPoint(x: c.center.x * size.width, y: c.center.y * size.height), c.radius * size.height * 1.2),
@@ -453,10 +455,40 @@ struct PadScreen: View {
                     Text("Wi-Fi : menus seulement").font(.system(size: 11)).foregroundColor(.orange)
                 }
                 Spacer()
+                if editing, let i = selected, i < layout.controls.count {
+                    // This control only: its own style, then its own colour.
+                    let t = tweaks[i] ?? Tweak()
+                    Button("Style : \(t.style?.label ?? "comme les autres")") {
+                        let order: [ButtonStyle?] = [nil] + ButtonStyle.allCases
+                        var n = t
+                        n.style = order[((order.firstIndex(of: t.style) ?? 0) + 1) % order.count]
+                        tweaks[i] = n
+                        TweakStore.save(base, tweaks)
+                    }
+                    if !layout.controls[i].isDpad {
+                        Button {
+                            var n = t
+                            let next = buttonColors[((buttonColors.firstIndex(of: t.color) ?? 0) + 1) % buttonColors.count]
+                            n.color = next
+                            // A colour shows with the Origine style.
+                            if next != nil { n.style = .original }
+                            tweaks[i] = n
+                            TweakStore.save(base, tweaks)
+                        } label: {
+                            HStack(spacing: 5) {
+                                Text("Couleur")
+                                Circle().fill(t.color.map { Color(argb: $0) } ?? .clear)
+                                    .overlay(Circle().stroke(.white, lineWidth: 1.5)).frame(width: 14, height: 14)
+                            }
+                        }
+                    }
+                }
                 if editing {
-                    Picker("Style", selection: $style) {
-                        ForEach(ButtonStyle.allCases, id: \.self) { Text($0.label).tag($0) }
-                    }.pickerStyle(.menu)
+                    if selected == nil {
+                        Picker("Style", selection: $style) {
+                            ForEach(ButtonStyle.allCases, id: \.self) { Text($0.label).tag($0) }
+                        }.pickerStyle(.menu)
+                    }
                     Button("Réinitialiser") {
                         tweaks = [:]
                         TweakStore.save(base, tweaks)

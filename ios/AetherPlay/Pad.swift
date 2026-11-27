@@ -304,11 +304,44 @@ private func baseLayout(_ platform: String?) -> PadLayout {
 
 // MARK: - Personnaliser
 
-/// A control moved (fractions of the screen) and resized by the player.
+/// A control moved (fractions of the screen) and resized by the player, with
+/// its own look if chosen: `style` (nil: the whole controller's) and `color`
+/// (0xAARRGGBB fill, nil: the console's).
 struct Tweak: Codable, Equatable {
     var dx: CGFloat = 0
     var dy: CGFloat = 0
     var scale: CGFloat = 1
+    var style: ButtonStyle?
+    var color: UInt32?
+}
+
+/// Colours offered per button (Personnaliser > Couleur), nil = the console's.
+let buttonColors: [UInt32?] = [nil, 0xFFF2F2F5, 0xFFFFD43B, 0xFFFF8A00, 0xFFE03131, 0xFFE64980, 0xFF7048E8, 0xFF1C7ED6, 0xFF0CA678, 0xFF2C2C36]
+
+/// Readable label colour on `fill`.
+func textOn(_ fill: UInt32) -> UInt32 {
+    let r = (fill >> 16) & 0xFF, g = (fill >> 8) & 0xFF, b = fill & 0xFF
+    return r * 299 + g * 587 + b * 114 > 150_000 ? 0xFF111114 : 0xFFFFFFFF
+}
+
+extension Control {
+    /// Same control in colour `c`.
+    func colored(_ c: UInt32?) -> Control {
+        guard let c else { return self }
+        switch self {
+        case let .button(id, label, x, y, r, _, _, pill, axis, value):
+            return .button(id: id, label: label, x: x, y: y, r: r, fill: c, text: textOn(c), pill: pill, axis: axis, axisValue: value)
+        case let .stick(axis, x, y, r, _):
+            return .stick(axis: axis, x: x, y: y, r: r, tint: c)
+        case .dpad:
+            return self
+        }
+    }
+
+    var isDpad: Bool {
+        if case .dpad = self { return true }
+        return false
+    }
 }
 
 extension PadLayout {
@@ -317,7 +350,7 @@ extension PadLayout {
         var out = self
         out.controls = controls.enumerated().map { i, c in
             guard let t = tweaks[i] else { return c }
-            return c.adjusted(dx: t.dx, dy: t.dy, scale: t.scale)
+            return c.adjusted(dx: t.dx, dy: t.dy, scale: t.scale).colored(t.color)
         }
         return out
     }
