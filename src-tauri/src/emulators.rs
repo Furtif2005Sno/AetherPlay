@@ -72,11 +72,27 @@ impl Emulator {
         if let Some(dir) = overrides.get(&self.id).filter(|d| !d.is_empty()) {
             return vec![vars.expand(dir, exe_path, rom)];
         }
+        if let Some(user) = self.portable_root(exe_path) {
+            return vec![user.join("nand").join("user").join("save")];
+        }
         self.saves.get(CURRENT_OS).into_iter().flatten().map(|t| vars.expand(t, exe_path, rom)).collect()
     }
 
     pub fn config_ini(&self, exe_path: &str, vars: &PathVars) -> Option<PathBuf> {
+        if let Some(user) = self.portable_root(exe_path) {
+            return Some(user.join("config").join("qt-config.ini"));
+        }
         self.config_ini.get(CURRENT_OS).map(|t| vars.expand(t, exe_path, None))
+    }
+
+    /// yuzu-family emulators (Eden, Eglantine) run portable when a `user`
+    /// folder sits next to the executable: their data and settings live there.
+    fn portable_root(&self, exe_path: &str) -> Option<PathBuf> {
+        if self.config_ini.is_empty() || exe_path.is_empty() {
+            return None;
+        }
+        let user = executable(exe_path).ok()?.parent()?.join("user");
+        user.is_dir().then_some(user)
     }
 
     pub fn core(&self, platform: &str) -> Option<&str> {

@@ -193,6 +193,6 @@ mod tests {
         // Long names are cut on a character boundary.
         let long = "é".repeat(40);
         let r = report(1, &Some(("nds".into(), long)));
-        assert!(std::str::from_utf8(&r[19..].split(|b| *b == 0).next().unwrap().to_vec()).is_ok());
+        assert!(std::str::from_utf8(r[19..].split(|b| *b == 0).next().unwrap()).is_ok());
     }
 }

@@ -107,23 +107,99 @@ fn to_portable(key: &str) -> String {
     }
 }
 
-/// Inverse of `to_portable` for this machine: the placeholder becomes the local
-/// profile folder (the one already holding saves), or `None` when the emulator
-/// has no profile folder yet (no game was ever started here).
+/// Inverse of `to_portable` for this machine: the placeholder becomes the
+/// emulator's active profile folder (see `switch_profile`), or `None` when the
+/// emulator has no profile yet (never started here).
 fn from_portable(key: &str, dirs: &[PathBuf]) -> Option<String> {
     let parts: Vec<&str> = key.splitn(4, '/').collect();
     let [idx, zeros, profile, rest] = parts.as_slice() else { return Some(key.to_string()) };
     if *profile != PROFILE {
         return Some(key.to_string());
     }
-    let root = dirs.get(idx.parse::<usize>().ok()?)?.join(zeros);
-    let local = std::fs::read_dir(root)
-        .ok()?
+    let local = switch_profile(dirs.get(idx.parse::<usize>().ok()?)?, zeros)?;
+    Some(format!("{idx}/{zeros}/{local}/{rest}"))
+}
+
+/// Profile folders already holding saves under `<save root>/<zeros>`, most
+/// recently modified first.
+fn profile_folders(save_root: &Path, zeros: &str) -> Vec<String> {
+    let mut found: Vec<(Option<SystemTime>, String)> = std::fs::read_dir(save_root.join(zeros))
+        .into_iter()
+        .flatten()
         .flatten()
         .filter(|e| e.path().is_dir())
-        .map(|e| e.file_name().to_string_lossy().into_owned())
-        .find(|n| is_hex(n, 32))?;
-    Some(format!("{idx}/{zeros}/{local}/{rest}"))
+        .filter_map(|e| {
+            let name = e.file_name().to_string_lossy().into_owned();
+            is_hex(&name, 32).then(|| (modified(&e.path()), name))
+        })
+        .collect();
+    found.sort_by_key(|f| std::cmp::Reverse(f.0));
+    found.into_iter().map(|(_, n)| n).collect()
+}
+
+/// Users of a yuzu-family `profiles.dat` (0x10 header, then 8 entries of
+/// 0xC8 bytes starting with the 16-byte UUID), as save folder names: the UUID
+/// read as two little-endian u64, high one first (`{:016X}{:016X}`).
+fn profile_ids(raw: &[u8]) -> Vec<String> {
+    (0..8)
+        .filter_map(|i| {
+            let at = 0x10 + i * 0xC8;
+            let b = raw.get(at..at + 16)?;
+            if b.iter().all(|x| *x == 0) {
+                return None;
+            }
+            let lo = u64::from_le_bytes(b[0..8].try_into().ok()?);
+            let hi = u64::from_le_bytes(b[8..16].try_into().ok()?);
+            Some(format!("{hi:016X}{lo:016X}"))
+        })
+        .collect()
+}
+
+/// `current_user` in the `[System]` section of the emulator's qt-config.ini
+/// (the profile selected in the emulator), next to the data folder (Windows,
+/// portable installs) or in ~/.config/<name> (macOS, Linux).
+fn current_user(data: &Path) -> Option<usize> {
+    let mut candidates = vec![data.join("config").join("qt-config.ini")];
+    if let (Some(name), Some(home)) = (data.file_name(), std::env::var_os("HOME")) {
+        let config =
+            std::env::var_os("XDG_CONFIG_HOME").map(PathBuf::from).unwrap_or_else(|| PathBuf::from(home).join(".config"));
+        candidates.push(config.join(name).join("qt-config.ini"));
+    }
+    let text = candidates.iter().find_map(|p| std::fs::read_to_string(p).ok())?;
+    let mut in_system = false;
+    for line in text.lines() {
+        let line = line.trim();
+        if line.starts_with('[') {
+            in_system = line == "[System]";
+        } else if in_system && let Some(v) = line.strip_prefix("current_user=") {
+            return v.trim().parse().ok();
+        }
+    }
+    None
+}
+
+/// The profile folder a Switch save goes to on this machine: the profile
+/// selected in the emulator (`profiles.dat` + `current_user`) when its folder
+/// exists, or when no profile folder exists at all yet (then it is created, so
+/// the first session is not played on a blank save); otherwise the folder
+/// used most recently (the old behaviour).
+fn switch_profile(save_root: &Path, zeros: &str) -> Option<String> {
+    let existing = profile_folders(save_root, zeros);
+    let nand = save_root.parent()?.parent()?;
+    let selected = std::fs::read(nand.join("system/save/8000000000000010/su/avators/profiles.dat")).ok().and_then(|raw| {
+        let ids = profile_ids(&raw);
+        let current = nand.parent().and_then(current_user).unwrap_or(0);
+        ids.get(current).or(ids.first()).cloned()
+    });
+    if let Some(id) = selected {
+        if let Some(same) = existing.iter().find(|n| n.eq_ignore_ascii_case(&id)) {
+            return Some(same.clone());
+        }
+        if existing.is_empty() {
+            return Some(id);
+        }
+    }
+    existing.into_iter().next()
 }
 
 fn modified(p: &Path) -> Option<SystemTime> {
@@ -381,6 +457,29 @@ mod tests {
             from_portable(&portable, &dirs).unwrap(),
             format!("0/0000000000000000/{pc_profile}/0400A3A01EE4C000/G00/STGDAT01.BIN")
         );
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn switch_profile_comes_from_profiles_dat() {
+        let root = std::env::temp_dir().join(format!("aep-nand-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let save = root.join("nand/user/save");
+        let sys = root.join("nand/system/save/8000000000000010/su/avators");
+        std::fs::create_dir_all(&sys).unwrap();
+        // Two users; the second is selected in the emulator.
+        let mut raw = vec![0u8; 0x10 + 8 * 0xC8];
+        raw[0x10..0x20].copy_from_slice(&[1, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0]);
+        raw[0x10 + 0xC8..0x20 + 0xC8].copy_from_slice(&[0x11, 0x22, 0, 0, 0, 0, 0, 0xAB, 0x33, 0, 0, 0, 0, 0, 0, 0xCD]);
+        std::fs::write(sys.join("profiles.dat"), &raw).unwrap();
+        assert_eq!(profile_ids(&raw), ["00000000000000020000000000000001", "CD00000000000033AB00000000002211"]);
+        std::fs::create_dir_all(root.join("config")).unwrap();
+        std::fs::write(root.join("config/qt-config.ini"), "[UI]\ncurrent_user=0\n[System]\ncurrent_user=1\n").unwrap();
+        // Fresh machine: no save folder yet, the selected profile is used.
+        assert_eq!(switch_profile(&save, "0000000000000000").as_deref(), Some("CD00000000000033AB00000000002211"));
+        // Its folder exists (lowercase here): used as is.
+        std::fs::create_dir_all(save.join("0000000000000000/cd00000000000033ab00000000002211")).unwrap();
+        assert_eq!(switch_profile(&save, "0000000000000000").as_deref(), Some("cd00000000000033ab00000000002211"));
         std::fs::remove_dir_all(&root).unwrap();
     }
 
