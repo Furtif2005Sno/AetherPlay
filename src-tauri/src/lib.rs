@@ -15,6 +15,7 @@ mod romm;
 mod roms;
 mod saves;
 mod shell;
+mod switch_keys;
 mod updater;
 
 use serde::Serialize;
@@ -279,6 +280,13 @@ async fn launch(app: AppHandle, rom_id: u64, fullscreen: bool) -> Result<LaunchR
         .map_err(|e| fail("launch-failed", e))?;
 
     let vars = path_vars(&app).map_err(|e| fail("launch-failed", e))?;
+    // Switch: an emulator without decryption keys gets those of another one here.
+    if !emu.config_ini.is_empty() {
+        let dirs: Vec<PathBuf> = switch_key_dirs(&app).into_iter().map(|(_, _, d)| d).collect();
+        for dir in switch_keys::share(&dirs) {
+            shell::log(&app, &format!("clés Switch copiées dans {}", dir.display()));
+        }
+    }
     // Switch: let Eden/Eglantine pick up updates/DLC shipped next to the base game.
     if rom.multi && let Some(ini) = emu.config_ini(exe, &vars) {
         emulators::register_external_content(&ini, &dest)
@@ -604,6 +612,43 @@ async fn import_save(app: AppHandle, id: String, path: String) -> Result<import:
         .map_err(|e| e.to_string())?
 }
 
+/// Keys folders of the Switch emulators set up here: (id, name, folder).
+fn switch_key_dirs(app: &AppHandle) -> Vec<(String, String, PathBuf)> {
+    let cfg = config::load(app);
+    let Ok(vars) = path_vars(app) else { return Vec::new() };
+    emulators::catalog()
+        .iter()
+        .filter(|e| !e.config_ini.is_empty())
+        .filter_map(|e| {
+            let exe = cfg.emulator_paths.get(&e.id).filter(|p| !p.is_empty())?;
+            let root = e.save_dirs(exe, None, &vars, &HashMap::new()).into_iter().next()?;
+            Some((e.id.clone(), e.name.clone(), switch_keys::keys_dir(&root)?))
+        })
+        .collect()
+}
+
+/// Switch emulators set up here and whether they have decryption keys.
+#[tauri::command]
+fn switch_keys_status(app: AppHandle) -> Vec<serde_json::Value> {
+    switch_key_dirs(&app)
+        .into_iter()
+        .map(|(id, name, dir)| json!({ "id": id, "name": name, "keys": switch_keys::has_keys(&dir), "dir": dir }))
+        .collect()
+}
+
+/// Installs the user's prod.keys (and the title.keys beside it) into every
+/// Switch emulator set up here.
+#[tauri::command]
+fn import_switch_keys(app: AppHandle, path: String) -> Result<usize, String> {
+    let dirs: Vec<PathBuf> = switch_key_dirs(&app).into_iter().map(|(_, _, d)| d).collect();
+    if dirs.is_empty() {
+        return Err("Aucun émulateur Switch installé (Eden, Eglantine).".into());
+    }
+    let files = switch_keys::import(std::path::Path::new(&path), &dirs)?;
+    shell::log(&app, &format!("clés Switch importées ({files} fichier(s)) dans {} émulateur(s)", dirs.len()));
+    Ok(dirs.len())
+}
+
 /// Shows the diagnostic log (aetherplay.log) in the file manager.
 #[tauri::command]
 fn open_log(app: AppHandle) -> Result<(), String> {
@@ -808,7 +853,9 @@ pub fn run() {
             phone_set_bt_player,
             update_later,
             update_install,
-            install_vigem
+            install_vigem,
+            switch_keys_status,
+            import_switch_keys
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

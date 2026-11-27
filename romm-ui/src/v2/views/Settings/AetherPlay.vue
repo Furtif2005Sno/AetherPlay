@@ -20,6 +20,8 @@ const installable = ref<string[]>([]);
 const saveDirs = ref<Record<string, string[]>>({});
 const cache = ref<CacheEntry[]>([]);
 const imageCache = ref(0);
+/** Switch emulators set up here and whether they have decryption keys. */
+const switchKeys = ref<{ id: string; name: string; keys: boolean; dir: string }[]>([]);
 /** Emulator id -> download percentage while installing, or an error message. */
 const installs = ref<Record<string, number | string>>({});
 const error = ref("");
@@ -108,6 +110,7 @@ const shared = computed(() => {
 });
 
 async function refresh() {
+  switchKeys.value = await app.switchKeysStatus().catch(() => []);
   [settings.value, saveDirs.value, cache.value, imageCache.value] = await Promise.all([
     app.settings(),
     app.saveDirs(),
@@ -164,6 +167,20 @@ async function importSave(emu: Emulator) {
   } catch (e) {
     error.value = String(e);
   }
+}
+
+async function importKeys() {
+  const path = await app.pickPath(false, "Fichier prod.keys de ta Switch");
+  if (!path) return;
+  error.value = "";
+  notice.value = "";
+  try {
+    const count = await app.importSwitchKeys(path);
+    notice.value = `Clés installées dans ${count} émulateur(s) Switch (title.keys aussi, s'il était à côté).`;
+  } catch (e) {
+    error.value = String(e);
+  }
+  await refresh();
 }
 
 async function openLog() {
@@ -432,6 +449,25 @@ onUnmounted(() => {
             hide-details
             @update:model-value="(v: unknown) => run(() => app.setPlatformEmulator(platform, (v as string) || null))"
           />
+        </div>
+      </div>
+    </SettingsSection>
+
+    <SettingsSection v-if="switchKeys.length" title="Clés Switch" icon="mdi-key-variant">
+      <template #header-actions>
+        <RBtn size="small" variant="outlined" @click="importKeys">Importer mes clés…</RBtn>
+      </template>
+      <div class="aep-list">
+        <p class="aep-muted aep-pad">
+          Les jeux Switch ont besoin du fichier prod.keys de ta console (et de title.keys s'il est à côté). Il est
+          installé dans tous tes émulateurs Switch. Au lancement, un émulateur sans clés reçoit celles d'un autre.
+        </p>
+        <div v-for="k in switchKeys" :key="k.id" class="aep-row">
+          <div class="aep-row__info">
+            <div class="aep-row__title">{{ k.name }}</div>
+            <div class="aep-muted aep-path">{{ k.dir }}</div>
+          </div>
+          <span :class="k.keys ? 'aep-notice' : 'aep-error'">{{ k.keys ? "Clés présentes" : "Clés manquantes" }}</span>
         </div>
       </div>
     </SettingsSection>

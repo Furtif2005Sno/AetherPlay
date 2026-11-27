@@ -94,6 +94,8 @@ export const app = {
   installVigem: () => invoke<void>("install_vigem"),
   phoneServerCode: () => invoke<{ server: string; code: string; expires_in: number }>("phone_server_code"),
   imageCacheSize: () => invoke<number>("image_cache_size"),
+  switchKeysStatus: () => invoke<{ id: string; name: string; keys: boolean; dir: string }[]>("switch_keys_status"),
+  importSwitchKeys: (path: string) => invoke<number>("import_switch_keys", { path }),
   imageCacheClear: () => invoke<void>("image_cache_clear"),
   onInstallProgress: (handler: (p: { id: string; done: number; total: number }) => void) =>
     tauri().event.listen<{ id: string; done: number; total: number }>("install-progress", (e) => handler(e.payload)),
