@@ -218,13 +218,23 @@ async fn proxy(app: &AppHandle, req: http::Request<Vec<u8>>) -> Result<http::Res
     }
     let (http, jar) = session();
     let url = format!("{}{pq}", cfg.server_url);
+    let writes = !matches!(method, reqwest::Method::GET | reqwest::Method::HEAD | reqwest::Method::OPTIONS);
+    let jar_cookies = || url.parse().ok().and_then(|u| jar.cookies(&u)).and_then(|v| v.to_str().ok().map(str::to_owned)).unwrap_or_default();
+    let csrf = |c: &str| cookie_value(c, "romm_csrftoken").or_else(|| cookie_value(c, "csrftoken"));
+    // RomM refuses writes (the login form's POST included) without its CSRF
+    // token. After a logout or on a first start the jar has none yet: any GET
+    // gets one, so ask before sending (the login used to fail with 403 until
+    // the app was restarted).
+    if writes && csrf(&jar_cookies()).is_none() {
+        let _ = http.get(format!("{}/api/heartbeat", cfg.server_url)).send().await;
+    }
     let mut rb = http.request(method.clone(), &url);
     for (name, value) in req.headers() {
         if !DROP_REQUEST.contains(&name.as_str()) {
             rb = rb.header(name.as_str(), value.as_bytes());
         }
     }
-    let cookies = url.parse().ok().and_then(|u| jar.cookies(&u)).and_then(|v| v.to_str().ok().map(str::to_owned)).unwrap_or_default();
+    let cookies = jar_cookies();
     let has_session = cookie_value(&cookies, "romm_session").is_some();
     // The page's own Authorization (its login form) wins; then the session the
     // proxy holds; then the credentials remembered from the last login.
@@ -238,9 +248,7 @@ async fn proxy(app: &AppHandle, req: http::Request<Vec<u8>>) -> Result<http::Res
         auth = "stored";
     }
     // Session-authenticated writes need RomM's CSRF token, which lives in the jar.
-    if !matches!(method, reqwest::Method::GET | reqwest::Method::HEAD | reqwest::Method::OPTIONS)
-        && let Some(token) = cookie_value(&cookies, "romm_csrftoken").or_else(|| cookie_value(&cookies, "csrftoken"))
-    {
+    if writes && let Some(token) = csrf(&cookies) {
         rb = rb.header("x-csrftoken", token);
     }
     let res = rb.body(req.into_body()).send().await.map_err(|e| e.to_string())?;
