@@ -142,40 +142,58 @@ pub fn resolve<'a>(
         .or_else(|| candidates().find_map(configured))
 }
 
-/// Adds `dir` to the `external_content_dirs` array of a yuzu-family
-/// `qt-config.ini` (section `[Paths]`), so updates/DLC stored there are
-/// loaded without installing them to NAND.
+/// Adds `dir` to the external content folders of a yuzu-family
+/// `qt-config.ini`, so updates/DLC stored there are loaded with the game
+/// without installing them to NAND. The emulator keeps them in section `[UI]`
+/// as the Qt array `Paths\external_content_dirs` (seen on Eglantine:
+/// `Paths\external_content_dirs\size=…`, entries `…\<n>\path=…`, like
+/// `Paths\gamedirs`). Entries an older AetherPlay wrote in a `[Paths]`
+/// section, which the emulator never read, are dropped.
 pub fn register_external_content(ini: &Path, dir: &Path) -> Result<(), String> {
+    const KEY: &str = r"Paths\external_content_dirs\";
     let dir = dir.to_string_lossy().replace('\\', "/");
     let text = std::fs::read_to_string(ini).unwrap_or_default();
     let mut lines: Vec<String> = text.lines().map(str::to_owned).collect();
-    let start = lines.iter().position(|l| l.trim() == "[Paths]");
-    let start = match start {
-        Some(i) => i,
+    let section_of = |lines: &[String], name: &str| {
+        let start = lines.iter().position(|l| l.trim() == name)?;
+        let end = lines[start + 1..].iter().position(|l| l.starts_with('[')).map_or(lines.len(), |i| start + 1 + i);
+        Some((start, end))
+    };
+
+    if let Some((start, end)) = section_of(&lines, "[Paths]") {
+        let kept: Vec<String> =
+            lines[start + 1..end].iter().filter(|l| !l.starts_with(r"external_content_dirs\")).cloned().collect();
+        if kept.iter().all(|l| l.trim().is_empty()) {
+            lines.drain(start..end);
+        } else {
+            lines.splice(start + 1..end, kept);
+        }
+    }
+
+    let (start, end) = match section_of(&lines, "[UI]") {
+        Some(s) => s,
         None => {
-            lines.push("[Paths]".into());
-            lines.len() - 1
+            lines.push("[UI]".into());
+            (lines.len() - 1, lines.len())
         }
     };
-    let end = lines[start + 1..].iter().position(|l| l.starts_with('[')).map_or(lines.len(), |i| start + 1 + i);
     let section = &lines[start + 1..end];
-    let already = section.iter().any(|l| {
-        l.split_once('=')
-            .is_some_and(|(k, v)| k.starts_with("external_content_dirs\\") && k.ends_with("\\path") && v == dir)
-    });
-    if already {
-        return Ok(());
-    }
-    let size = section
+    let size_key = format!("{KEY}size=");
+    let already = section
         .iter()
-        .find_map(|l| l.strip_prefix("external_content_dirs\\size="))
-        .and_then(|v| v.trim().parse::<usize>().ok())
-        .unwrap_or(0);
-    let new_size = size + 1;
-    let mut section: Vec<String> = section.iter().filter(|l| !l.starts_with("external_content_dirs\\size=")).cloned().collect();
-    section.push(format!("external_content_dirs\\{new_size}\\path={dir}"));
-    section.push(format!("external_content_dirs\\size={new_size}"));
-    lines.splice(start + 1..end, section);
+        .any(|l| l.split_once('=').is_some_and(|(k, v)| k.starts_with(KEY) && k.ends_with(r"\path") && v == dir));
+    if !already {
+        let size = section
+            .iter()
+            .find_map(|l| l.strip_prefix(size_key.as_str()))
+            .and_then(|v| v.trim().parse::<usize>().ok())
+            .unwrap_or(0);
+        let new_size = size + 1;
+        let mut section: Vec<String> = section.iter().filter(|l| !l.starts_with(&size_key)).cloned().collect();
+        section.push(format!(r"{KEY}{new_size}\path={dir}"));
+        section.push(format!("{size_key}{new_size}"));
+        lines.splice(start + 1..end, section);
+    }
     if let Some(parent) = ini.parent() {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
@@ -355,15 +373,22 @@ mod tests {
     #[test]
     fn external_content_is_added_once_and_keeps_other_settings() {
         let ini = std::env::temp_dir().join(format!("romm-qt-{}.ini", std::process::id()));
-        std::fs::write(&ini, "[UI]\na=1\n\n[Paths]\nexternal_content_dirs\\1\\path=C:/old\nexternal_content_dirs\\size=1\nfoo=bar\n[Other]\nb=2\n").unwrap();
+        std::fs::write(
+            &ini,
+            "[UI]\na=1\nPaths\\external_content_dirs\\size=1\nPaths\\external_content_dirs\\1\\path=C:/old\n\n\
+             [Paths]\nexternal_content_dirs\\1\\path=C:/x\nexternal_content_dirs\\size=1\nfoo=bar\n[Other]\nb=2\n",
+        )
+        .unwrap();
         register_external_content(&ini, Path::new("C:\\roms\\switch\\Game")).unwrap();
         register_external_content(&ini, Path::new("C:\\roms\\switch\\Game")).unwrap();
         let text = std::fs::read_to_string(&ini).unwrap();
         std::fs::remove_file(&ini).unwrap();
         assert_eq!(text.matches("C:/roms/switch/Game").count(), 1);
-        assert!(text.contains("external_content_dirs\\2\\path=C:/roms/switch/Game"));
-        assert!(text.contains("external_content_dirs\\size=2") && !text.contains("size=1"));
-        assert!(text.contains("foo=bar") && text.contains("[Other]\nb=2") && text.contains("[UI]\na=1"));
+        assert!(text.contains("Paths\\external_content_dirs\\2\\path=C:/roms/switch/Game"));
+        assert!(text.contains("Paths\\external_content_dirs\\size=2") && !text.contains("size=1"));
+        // The old misplaced entries are gone, other settings kept.
+        assert!(text.contains("C:/old") && !text.contains("C:/x") && text.contains("[Paths]\nfoo=bar"));
+        assert!(text.contains("[Other]\nb=2") && text.contains("[UI]\na=1"));
     }
 
     #[test]
