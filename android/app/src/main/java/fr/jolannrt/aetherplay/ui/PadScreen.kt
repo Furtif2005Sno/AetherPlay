@@ -93,6 +93,8 @@ fun PadScreen(
     frame: Bitmap? = null,
     screenSize: Pair<Int, Int>? = null,
     onTouch: (Float, Float, Boolean) -> Unit = { _, _, _ -> },
+    buttonStyle: ButtonStyle = ButtonStyle.ORIGINAL,
+    onButtonStyle: (ButtonStyle) -> Unit = {},
 ) {
     val accent = Color(layout.accent)
     var editing by remember { mutableStateOf(false) }
@@ -114,9 +116,9 @@ fun PadScreen(
             }
         }
         if (editing) {
-            EditPad(layout, tweaks, selected, { selected = it }, onTweaks)
+            EditPad(layout, tweaks, selected, { selected = it }, onTweaks, buttonStyle)
         } else {
-            Pad(layout.tweaked(tweaks), onState, frame, screenSize, onTouch)
+            Pad(layout.tweaked(tweaks), onState, frame, screenSize, onTouch, buttonStyle)
         }
         Row(
             Modifier
@@ -205,6 +207,11 @@ fun PadScreen(
                     TextButton(onClick = { resize(1f / 1.12f) }) { Text("−", color = Color.White, fontSize = 20.sp) }
                     TextButton(onClick = { resize(1.12f) }) { Text("+", color = Color.White, fontSize = 20.sp) }
                 }
+                // Accessibility: button colours (Origine = the console's, by default).
+                TextButton(onClick = {
+                    val all = ButtonStyle.entries
+                    onButtonStyle(all[(all.indexOf(buttonStyle) + 1) % all.size])
+                }) { Text("Style : ${buttonStyle.label}", color = Color.White) }
                 TextButton(onClick = { onTweaks(emptyMap()); selected = null }) { Text("Réinitialiser", color = Color.White) }
                 TextButton(onClick = { editing = false; selected = null }) { Text("Terminé", color = accent, fontWeight = FontWeight.Bold) }
             }
@@ -220,6 +227,7 @@ private fun EditPad(
     selected: Int?,
     onSelect: (Int?) -> Unit,
     onTweaks: (Map<Int, Tweak>) -> Unit,
+    style: ButtonStyle = ButtonStyle.ORIGINAL,
 ) {
     val layout = base.tweaked(tweaks)
     val current by rememberUpdatedState(tweaks)
@@ -254,9 +262,9 @@ private fun EditPad(
         ) {
             layout.controls.forEachIndexed { i, ctl ->
                 when (ctl) {
-                    is Control.Button -> drawButton(ctl, 0, false, layout.accent)
-                    is Control.Dpad -> drawDpad(ctl, 0, layout.accent)
-                    is Control.Stick -> drawStick(ctl, Offset.Zero, layout.accent)
+                    is Control.Button -> drawButton(ctl, 0, false, layout.accent, style)
+                    is Control.Dpad -> drawDpad(ctl, 0, layout.accent, style)
+                    is Control.Stick -> drawStick(ctl, Offset.Zero, layout.accent, style)
                 }
                 val (x, y, r) = when (ctl) {
                     is Control.Button -> Triple(ctl.x, ctl.y, if (ctl.pill) ctl.r * 2.3f else ctl.r)
@@ -298,6 +306,7 @@ private fun Pad(
     frame: Bitmap? = null,
     screenSize: Pair<Int, Int>? = null,
     onTouch: (Float, Float, Boolean) -> Unit = { _, _, _ -> },
+    style: ButtonStyle = ButtonStyle.ORIGINAL,
 ) {
     val view = LocalView.current
     val liveSize by rememberUpdatedState(screenSize)
@@ -396,9 +405,9 @@ private fun Pad(
             }
             for (ctl in layout.controls) {
                 when (ctl) {
-                    is Control.Button -> drawButton(ctl, pressed, ctl in axisButtons, layout.accent)
-                    is Control.Dpad -> drawDpad(ctl, pressed, layout.accent)
-                    is Control.Stick -> drawStick(ctl, sticks[ctl.axis] ?: Offset.Zero, layout.accent)
+                    is Control.Button -> drawButton(ctl, pressed, ctl in axisButtons, layout.accent, style)
+                    is Control.Dpad -> drawDpad(ctl, pressed, layout.accent, style)
+                    is Control.Stick -> drawStick(ctl, sticks[ctl.axis] ?: Offset.Zero, layout.accent, style)
                 }
             }
         }
@@ -461,54 +470,103 @@ private fun DrawScope.label(text: String, center: Offset, size: Float, color: Lo
     }
 }
 
-private fun DrawScope.drawButton(b: Control.Button, pressed: Int, axisDown: Boolean, accent: Long) {
+/** How buttons are drawn (Personnaliser > Style): the console's colours by default. */
+enum class ButtonStyle(val label: String) {
+    ORIGINAL("Origine"),
+    CONTRAST("Contraste élevé"),
+    OUTLINE("Contour"),
+}
+
+private val CONTRAST_FILL = Color(0xFFF2F2F5)
+private val CONTRAST_TEXT = 0xFF111114
+
+private fun DrawScope.drawButton(b: Control.Button, pressed: Int, axisDown: Boolean, accent: Long, style: ButtonStyle = ButtonStyle.ORIGINAL) {
     val h = size.height
     val c = Offset(b.x * size.width, b.y * h)
     val r = b.r * h
     val down = if (b.axis >= 0) axisDown else pressed and (1 shl b.id) != 0
-    val fill = Color(b.fill).let { if (down) lerpWhite(it) else it }
+    val base = when (style) {
+        ButtonStyle.ORIGINAL -> Color(b.fill)
+        ButtonStyle.CONTRAST -> CONTRAST_FILL
+        ButtonStyle.OUTLINE -> Color.Black.copy(alpha = 0.25f)
+    }
+    val fill = if (down) (if (style == ButtonStyle.CONTRAST) Color(accent) else lerpWhite(base)) else base
+    val text = when (style) {
+        ButtonStyle.ORIGINAL -> b.text
+        ButtonStyle.CONTRAST -> if (down) 0xFFFFFFFF else CONTRAST_TEXT
+        ButtonStyle.OUTLINE -> 0xFFFFFFFF
+    }
+    val outline = style == ButtonStyle.OUTLINE
     if (b.pill) {
         val half = Size(r * 2.2f, r * 1.1f)
         drawRoundRect(fill, c - Offset(half.width, half.height), half * 2f, CornerRadius(half.height))
-        if (down) drawRoundRect(Color(accent), c - Offset(half.width, half.height), half * 2f, CornerRadius(half.height), style = Stroke(3f))
-        label(b.label, c, r * 0.8f, b.text)
+        if (outline) drawRoundRect(Color.White, c - Offset(half.width, half.height), half * 2f, CornerRadius(half.height), style = Stroke(4f))
+        if (down) drawRoundRect(Color(accent), c - Offset(half.width, half.height), half * 2f, CornerRadius(half.height), style = Stroke(4f))
+        label(b.label, c, r * 0.8f, text)
     } else {
         drawCircle(Color.Black.copy(alpha = 0.35f), r, c + Offset(0f, r * 0.08f))
         drawCircle(fill, r, c)
-        if (down) drawCircle(Color(accent), r, c, style = Stroke(4f))
-        label(b.label, c, r * 0.9f, b.text)
+        if (outline) drawCircle(Color.White, r, c, style = Stroke(5f))
+        if (down) drawCircle(Color(accent), r, c, style = Stroke(5f))
+        label(b.label, c, r * 0.9f, text)
     }
 }
 
-private fun DrawScope.drawDpad(d: Control.Dpad, pressed: Int, accent: Long) {
+private fun DrawScope.drawDpad(d: Control.Dpad, pressed: Int, accent: Long, style: ButtonStyle = ButtonStyle.ORIGINAL) {
     val h = size.height
     val c = Offset(d.x * size.width, d.y * h)
     val r = d.r * h
     val arm = r * 0.36f
-    val base = Color(0xFF16161B)
+    val corner = CornerRadius(arm * 0.4f)
+    val base = when (style) {
+        ButtonStyle.ORIGINAL -> Color(0xFF16161B)
+        ButtonStyle.CONTRAST -> CONTRAST_FILL
+        ButtonStyle.OUTLINE -> Color.Black.copy(alpha = 0.25f)
+    }
     drawCircle(Color.Black.copy(alpha = 0.18f), r * 1.12f, c)
     drawCircle(Color.White.copy(alpha = 0.08f), r * 1.12f, c, style = Stroke(2f))
-    drawRoundRect(base, Offset(c.x - arm, c.y - r), Size(arm * 2, r * 2), CornerRadius(arm * 0.4f))
-    drawRoundRect(base, Offset(c.x - r, c.y - arm), Size(r * 2, arm * 2), CornerRadius(arm * 0.4f))
+    val vertical = Offset(c.x - arm, c.y - r) to Size(arm * 2, r * 2)
+    val horizontal = Offset(c.x - r, c.y - arm) to Size(r * 2, arm * 2)
+    for ((o, s) in listOf(vertical, horizontal)) drawRoundRect(base, o, s, corner)
+    // Always outlined, so the cross reads on dark backgrounds too.
+    val edge = if (style == ButtonStyle.ORIGINAL) Color.White.copy(alpha = 0.35f) else Color.White
+    if (style != ButtonStyle.CONTRAST) for ((o, s) in listOf(vertical, horizontal)) drawRoundRect(edge, o, s, corner, style = Stroke(if (style == ButtonStyle.OUTLINE) 4f else 2.5f))
+    // Arrows: which way each arm goes.
+    val arrow = if (style == ButtonStyle.CONTRAST) Color(CONTRAST_TEXT) else Color.White.copy(alpha = 0.7f)
+    val a = arm * 0.45f
+    val tip = r * 0.82f
+    for ((dx, dy) in listOf(0f to -1f, 0f to 1f, -1f to 0f, 1f to 0f)) {
+        val p = c + Offset(dx * tip, dy * tip)
+        val back = c + Offset(dx * (tip - a), dy * (tip - a))
+        val side = Offset(dy * a * 0.8f, dx * a * 0.8f)
+        drawPath(androidx.compose.ui.graphics.Path().apply {
+            moveTo(p.x, p.y); lineTo(back.x + side.x, back.y + side.y); lineTo(back.x - side.x, back.y - side.y); close()
+        }, arrow)
+    }
     val hl = Color(accent).copy(alpha = 0.85f)
-    if (pressed and (1 shl Btn.UP) != 0) drawRoundRect(hl, Offset(c.x - arm, c.y - r), Size(arm * 2, r - arm), CornerRadius(arm * 0.4f))
-    if (pressed and (1 shl Btn.DOWN) != 0) drawRoundRect(hl, Offset(c.x - arm, c.y + arm), Size(arm * 2, r - arm), CornerRadius(arm * 0.4f))
-    if (pressed and (1 shl Btn.LEFT) != 0) drawRoundRect(hl, Offset(c.x - r, c.y - arm), Size(r - arm, arm * 2), CornerRadius(arm * 0.4f))
-    if (pressed and (1 shl Btn.RIGHT) != 0) drawRoundRect(hl, Offset(c.x + arm, c.y - arm), Size(r - arm, arm * 2), CornerRadius(arm * 0.4f))
+    if (pressed and (1 shl Btn.UP) != 0) drawRoundRect(hl, Offset(c.x - arm, c.y - r), Size(arm * 2, r - arm), corner)
+    if (pressed and (1 shl Btn.DOWN) != 0) drawRoundRect(hl, Offset(c.x - arm, c.y + arm), Size(arm * 2, r - arm), corner)
+    if (pressed and (1 shl Btn.LEFT) != 0) drawRoundRect(hl, Offset(c.x - r, c.y - arm), Size(r - arm, arm * 2), corner)
+    if (pressed and (1 shl Btn.RIGHT) != 0) drawRoundRect(hl, Offset(c.x + arm, c.y - arm), Size(r - arm, arm * 2), corner)
 }
 
-private fun DrawScope.drawStick(s: Control.Stick, value: Offset, accent: Long) {
+private fun DrawScope.drawStick(s: Control.Stick, value: Offset, accent: Long, style: ButtonStyle = ButtonStyle.ORIGINAL) {
     val h = size.height
     val c = Offset(s.x * size.width, s.y * h)
     val r = s.r * h
     drawCircle(Color.Black.copy(alpha = 0.3f), r, c)
-    drawCircle(Color.White.copy(alpha = 0.12f), r, c, style = Stroke(3f))
+    drawCircle(Color.White.copy(alpha = if (style == ButtonStyle.ORIGINAL) 0.12f else 0.8f), r, c, style = Stroke(if (style == ButtonStyle.ORIGINAL) 3f else 4f))
     val knob = c + value * (r * 0.6f)
     val active = value != Offset.Zero
-    drawCircle(Color(s.tint).let { if (active) lerpWhite(it) else it }, r * 0.48f, knob)
+    val tint = when (style) {
+        ButtonStyle.ORIGINAL -> Color(s.tint)
+        ButtonStyle.CONTRAST -> CONTRAST_FILL
+        ButtonStyle.OUTLINE -> Color.Black.copy(alpha = 0.25f)
+    }
+    drawCircle(if (active) lerpWhite(tint) else tint, r * 0.48f, knob)
+    if (style == ButtonStyle.OUTLINE) drawCircle(Color.White, r * 0.48f, knob, style = Stroke(4f))
     if (active) drawCircle(Color(accent), r * 0.48f, knob, style = Stroke(4f))
 }
-
 private fun lerpWhite(c: Color) = Color(
     min(1f, c.red + (1 - c.red) * 0.35f),
     min(1f, c.green + (1 - c.green) * 0.35f),

@@ -276,16 +276,38 @@ async fn launch(app: AppHandle, rom_id: u64, fullscreen: bool) -> Result<LaunchR
             let ini = emu.config_ini(exe, &vars);
             let (emu_id, exe_path) = (emu.id.clone(), PathBuf::from(exe));
             let save_dir = emu.save_dirs(exe, Some(&target), &vars, &cfg.save_dirs).into_iter().next();
+            let overrides = cfg.player_overrides.clone();
             let res = tauri::async_runtime::spawn_blocking(move || {
-                let found = controller::detect(&lib)?;
+                let mut found = controller::detect(&lib)?;
+                // Player numbers chosen in the settings for Bluetooth phones: move
+                // their controller to that place in the order (configured emulators
+                // and the number shown on the phone follow).
+                let bt_names = bt_link::connected_phones();
+                let mut phone_at: Vec<usize> =
+                    found.pads.iter().enumerate().filter(|(_, p)| p.name == "AetherPlay Manette").map(|(i, _)| i).collect();
+                for (name, pos) in bt_names.iter().zip(phone_at.clone()) {
+                    if let Some(want) = overrides.get(name).map(|n| (*n as usize).saturating_sub(1))
+                        && want < found.pads.len()
+                        && want != pos
+                    {
+                        found.pads.swap(pos, want);
+                        for p in phone_at.iter_mut() {
+                            if *p == want {
+                                *p = pos;
+                            } else if *p == pos {
+                                *p = want;
+                            }
+                        }
+                    }
+                }
                 // Bluetooth phones get player numbers in the emulator's order.
                 bt_phone::order(found.pads.iter().map(|p| p.path.clone()).collect());
-                let phone_positions: Vec<usize> =
-                    found.pads.iter().enumerate().filter(|(_, p)| p.name == "AetherPlay Manette").map(|(i, _)| i).collect();
+                // Positions follow each phone through the swaps above.
+                let phone_positions = phone_at;
                 bt_link::order(phone_positions.clone());
                 // Through RomM for phones without a network link: Bluetooth name -> player.
                 let bt_players: Vec<(String, u8)> =
-                    bt_link::connected_phones().into_iter().zip(phone_positions.iter().map(|i| (*i + 1) as u8)).collect();
+                    bt_names.into_iter().zip(phone_positions.iter().map(|i| (*i + 1) as u8)).collect();
                 // RetroTogether: each controller becomes a player in the emulator.
                 let players = match (emu_id.as_str(), &ini, &save_dir) {
                     (_, Some(ini), _) => controller::apply(ini, &found.pads)?,
@@ -618,6 +640,23 @@ async fn phone_server_code(app: AppHandle) -> Result<serde_json::Value, String> 
     Ok(serde_json::json!({ "server": config::load(&app).server_url, "code": code, "expires_in": expires_in }))
 }
 
+/// Player number of a phone linked to AetherPlay (Wi-Fi or Bluetooth channel).
+#[tauri::command]
+fn phone_set_player(id: u64, player: u8) {
+    phone::change_player(id, player.clamp(1, 8));
+}
+
+/// Player number for a Bluetooth phone known by its name (None: automatic).
+#[tauri::command]
+fn phone_set_bt_player(app: AppHandle, name: String, player: Option<u8>) -> Result<(), String> {
+    let mut cfg = config::load(&app);
+    match player {
+        Some(p) => cfg.player_overrides.insert(name, p.clamp(1, 8)),
+        None => cfg.player_overrides.remove(&name),
+    };
+    config::save(&app, &cfg)
+}
+
 /// The update to offer in the pop-up, if any.
 #[tauri::command]
 fn update_status() -> Option<serde_json::Value> {
@@ -660,8 +699,10 @@ fn image_cache_clear(app: AppHandle) -> Result<(), String> {
 
 /// Android controller: pairing code, port, connected phones.
 #[tauri::command]
-fn phone_status() -> serde_json::Value {
-    phone::status()
+fn phone_status(app: AppHandle) -> serde_json::Value {
+    let mut status = phone::status();
+    status["overrides"] = serde_json::json!(config::load(&app).player_overrides);
+    status
 }
 
 /// Windows: installs the ViGEmBus driver (virtual controller for Wi-Fi input).
@@ -739,6 +780,8 @@ pub fn run() {
             proxy_upload,
             update_status,
             phone_server_code,
+            phone_set_player,
+            phone_set_bt_player,
             update_later,
             update_install,
             install_vigem

@@ -33,6 +33,9 @@ pub struct Config {
     /// This computer as a RomM device ("now playing" relay for phones).
     #[serde(default)]
     pub romm_device_id: Option<String>,
+    /// Player number chosen for a Bluetooth phone (by its Bluetooth name).
+    #[serde(default)]
+    pub player_overrides: HashMap<String, u8>,
 }
 
 fn default_true() -> bool {
@@ -52,6 +55,7 @@ impl Default for Config {
             phones: HashMap::new(),
             dual_screen: Vec::new(),
             romm_device_id: None,
+            player_overrides: HashMap::new(),
         }
     }
 }

@@ -200,6 +200,11 @@ mod win {
         let mut pending = Vec::new();
         let mut buf = [0u8; 1024];
         while ok {
+            // Changed in the settings.
+            if let Some(p) = phone::player_of(id).filter(|p| *p != player) {
+                player = p;
+                ok &= write(s, &json!({ "t": "player", "n": p }).to_string());
+            }
             while let Ok(p) = players.try_recv() {
                 player = p;
                 phone::set_player(id, p);

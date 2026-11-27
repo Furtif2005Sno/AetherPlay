@@ -115,7 +115,7 @@ class MainActivity : ComponentActivity() {
                 relayLinked -> relayGame
                 else -> btInfo?.platform?.let { fr.jolannrt.aetherplay.net.Game(it, btInfo?.name ?: it, null) }
             }
-            val game = preview?.let { fr.jolannrt.aetherplay.net.Game(it, "Aperçu : $it", null) }
+            val game = preview?.let { fr.jolannrt.aetherplay.net.Game(if (it == "menu") "" else it, "Aperçu : $it", null) }
                 ?: if (wifiUp) linkGame else btGame
             val token by link.token.collectAsState()
             val btStatus by hid.status.collectAsState()
@@ -132,6 +132,10 @@ class MainActivity : ComponentActivity() {
             val screenSize = previewScreen ?: linkScreen
             val frame = previewFrame ?: linkFrame
             var showPad by remember { mutableStateOf(preview != null) }
+            var buttonStyle by remember {
+                mutableStateOf(runCatching { fr.jolannrt.aetherplay.ui.ButtonStyle.valueOf((intent.getStringExtra("style")?.takeIf { debuggable } ?: prefs.getString("button_style", null))!!) }
+                    .getOrDefault(fr.jolannrt.aetherplay.ui.ButtonStyle.ORIGINAL))
+            }
             var backdrop by remember {
                 mutableStateOf(runCatching { Backdrop.valueOf(prefs.getString("backdrop", null)!!) }.getOrDefault(Backdrop.CONTROLLER))
             }
@@ -198,6 +202,8 @@ class MainActivity : ComponentActivity() {
                     player = player,
                     wifiInput = wifiInput,
                     backdrop = backdrop,
+                    buttonStyle = buttonStyle,
+                    onButtonStyle = { buttonStyle = it; prefs.edit().putString("button_style", it.name).apply() },
                     frame = frame,
                     screenSize = screenSize,
                     onTouch = link::sendTouch,

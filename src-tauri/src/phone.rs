@@ -40,7 +40,6 @@ struct Shared {
 
 #[derive(Clone, serde::Serialize)]
 struct Phone {
-    #[serde(skip)]
     id: u64,
     name: String,
     /// Player number shown on the phone: 1, 2, 3…
@@ -98,6 +97,8 @@ pub fn status() -> Value {
         "pads": gamepad::connected_pads(),
         // Player numbers of the Android controllers linked by Bluetooth only.
         "bluetooth": crate::bt_phone::players(),
+        // Phones connected by Bluetooth to this computer (Windows), for numbering.
+        "bluetooth_phones": crate::bt_link::connected_phones(),
         "os": crate::emulators::CURRENT_OS,
     })
 }
@@ -125,6 +126,34 @@ pub fn bluetooth_join(name: &str) -> (u64, u8) {
 
 pub fn bluetooth_leave(id: u64) {
     leave(id);
+}
+
+/// The user picks a player number for phone `id` (settings): the phone that
+/// had it takes the old one. Virtual controllers follow at the next launch.
+pub fn change_player(id: u64, player: u8) {
+    let mut phones = SHARED.phones.lock().expect("phones");
+    let Some(old) = phones.iter().find(|p| p.id == id).map(|p| p.player) else { return };
+    for p in phones.iter_mut() {
+        if p.id == id {
+            p.player = player;
+        } else if p.player == player {
+            p.player = old;
+        }
+    }
+    phones.sort_by_key(|p| p.player);
+    let numbers: Vec<(u64, u8)> = phones.iter().map(|p| (p.id, p.player)).collect();
+    drop(phones);
+    let mut pads = PADS.lock().expect("pads");
+    for p in pads.iter_mut() {
+        if let Some((_, n)) = numbers.iter().find(|(i, _)| *i == p.0) {
+            p.1 = *n;
+        }
+    }
+}
+
+/// Current player number of phone `id`.
+pub fn player_of(id: u64) -> Option<u8> {
+    SHARED.phones.lock().expect("phones").iter().find(|p| p.id == id).map(|p| p.player)
 }
 
 /// RetroTogether over Bluetooth: player number from the emulator's order.
@@ -274,9 +303,18 @@ async fn serve(app: &AppHandle, stream: TcpStream) -> Result<(), String> {
         shell::log(app, "manette Android : pas de manette virtuelle, Bluetooth nécessaire pour les jeux");
     }
     let mut last_try = std::time::Instant::now();
+    // The number can be changed in the settings: tell the phone.
+    let mut shown_player = me.player;
+    let mut tick = tokio::time::interval(std::time::Duration::from_secs(1));
     let result: Result<(), String> = async {
         loop {
             tokio::select! {
+                _ = tick.tick() => {
+                    if let Some(p) = player_of(me.id).filter(|p| *p != shown_player) {
+                        shown_player = p;
+                        tx.send(send(json!({ "t": "player", "n": p }))).await.map_err(|e| e.to_string())?;
+                    }
+                }
                 msg = rx.next() => {
                     let Some(Ok(msg)) = msg else { return Ok(()) };
                     let Message::Text(text) = msg else { continue };

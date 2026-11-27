@@ -44,6 +44,16 @@ const refreshPhone = async () => {
   const seen = new Set(native.map((p) => p.name));
   detected.value = [...native, ...phone.value.pads.filter((n) => !seen.has(n)).map((name) => ({ name, phone: false }))];
 };
+const playerItems = [1, 2, 3, 4].map((n) => ({ title: `Joueur ${n}`, value: n }));
+async function setPlayer(id: number, player: number) {
+  await app.phoneSetPlayer(id, player);
+  await refreshPhone();
+}
+async function setBtPlayer(name: string, player: number) {
+  await app.phoneSetBtPlayer(name, player || null);
+  await refreshPhone();
+}
+
 const serverCode = ref<{ server: string; code: string; expires_in: number } | null>(null);
 async function linkPhoneToServer() {
   error.value = "";
@@ -304,10 +314,35 @@ onUnmounted(() => {
           </div>
         </div>
       </div>
-      <div v-for="p in phone.phones" :key="p.player" class="aep-row">
+      <div v-for="p in phone.phones" :key="p.id" class="aep-row">
         <div class="aep-row__info">
           <div class="aep-row__title"><span class="aep-tag">J{{ p.player }}</span> {{ p.name }}</div>
         </div>
+        <RSelect
+          class="aep-player"
+          :model-value="p.player"
+          :items="playerItems"
+          density="compact"
+          hide-details
+          @update:model-value="(v: unknown) => setPlayer(p.id, v as number)"
+        />
+      </div>
+      <div v-for="name in phone.bluetooth_phones" :key="'btn' + name" class="aep-row">
+        <div class="aep-row__info">
+          <div class="aep-row__title">{{ name }} <span class="aep-tag">Bluetooth</span></div>
+          <div class="aep-muted">
+            Numéro de joueur appliqué au prochain lancement (Eden, Eglantine, PCSX2, DuckStation, Dolphin ; RetroArch
+            numérote dans l'ordre de connexion des manettes).
+          </div>
+        </div>
+        <RSelect
+          class="aep-player"
+          :model-value="phone.overrides[name] ?? 0"
+          :items="[{ title: 'Auto', value: 0 }, ...playerItems]"
+          density="compact"
+          hide-details
+          @update:model-value="(v: unknown) => setBtPlayer(name, v as number)"
+        />
       </div>
       <div v-for="n in phone.bluetooth" :key="'bt' + n" class="aep-row">
         <div class="aep-row__info">
@@ -487,6 +522,9 @@ onUnmounted(() => {
   justify-content: flex-end;
   gap: 6px;
   max-width: 60%;
+}
+.aep-player {
+  max-width: 140px;
 }
 .aep-pin {
   font-family: var(--r-font-mono, monospace);

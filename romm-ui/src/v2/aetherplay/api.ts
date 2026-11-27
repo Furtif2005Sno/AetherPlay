@@ -53,7 +53,7 @@ const invoke = <T>(cmd: string, args?: Record<string, unknown>) => tauri().core.
 export interface PhoneStatus {
   pin: string;
   port: number;
-  phones: { name: string; player: number }[];
+  phones: { id: number; name: string; player: number }[];
   /** Wi-Fi input can reach the games (virtual controller available). */
   virtual: boolean;
   os: "windows" | "macos" | "linux";
@@ -63,6 +63,10 @@ export interface PhoneStatus {
   pads: string[];
   /** Player numbers of the Android controllers linked by Bluetooth only. */
   bluetooth: number[];
+  /** Phones connected by Bluetooth to this computer (Windows). */
+  bluetooth_phones: string[];
+  /** Player numbers chosen for Bluetooth phones, by name. */
+  overrides: Record<string, number>;
 }
 
 export const app = {
@@ -85,6 +89,8 @@ export const app = {
   openLog: () => invoke<void>("open_log"),
   phoneStatus: () => invoke<PhoneStatus>("phone_status"),
   phoneForget: () => invoke<void>("phone_forget"),
+  phoneSetPlayer: (id: number, player: number) => invoke<void>("phone_set_player", { id, player }),
+  phoneSetBtPlayer: (name: string, player: number | null) => invoke<void>("phone_set_bt_player", { name, player }),
   installVigem: () => invoke<void>("install_vigem"),
   phoneServerCode: () => invoke<{ server: string; code: string; expires_in: number }>("phone_server_code"),
   imageCacheSize: () => invoke<number>("image_cache_size"),
