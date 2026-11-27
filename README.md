@@ -12,6 +12,7 @@ Licence : **AGPL-3.0** (comme RomM, dont l'interface est reprise).
 - **Mac** (Apple Silicon) : [AetherPlay-Mac.dmg](https://github.com/Furtif2005Sno/AetherPlay/releases/latest/download/AetherPlay-Mac.dmg)
 - **SteamOS / Linux** (Steam Deck, ROG Ally…) : [AetherPlay-SteamOS.AppImage](https://github.com/Furtif2005Sno/AetherPlay/releases/latest/download/AetherPlay-SteamOS.AppImage)
 - **Android** (le téléphone comme manette) : [AetherPlay-Android.apk](https://github.com/Furtif2005Sno/AetherPlay/releases/latest/download/AetherPlay-Android.apk)
+- **iPhone** (manette, Wi-Fi) : [AetherPlay-iOS.ipa](https://github.com/Furtif2005Sno/AetherPlay/releases/latest/download/AetherPlay-iOS.ipa), à installer avec [SideStore](https://sidestore.io)
 
 Ces liens donnent toujours la dernière version.
 
@@ -59,6 +60,14 @@ L'app Android (`android/`, protocole dans `android/PROTOCOL.md`) fait du télép
 - **Personnaliser** (icône réglages de la manette) : glisser les boutons, les agrandir ou les réduire, réglages gardés par console.
 - **Deuxième écran** (Windows) : pour la DS (melonDS) et le GamePad Wii U (Cemu), l'écran tactile s'affiche sur le téléphone au milieu des boutons, et on touche directement dessus. Il suffit que le téléphone soit connecté au lancement du jeu.
 - **RetroTogether** : chaque téléphone connecté est un joueur (J1, J2…). AetherPlay attribue les manettes aux joueurs dans l'ordre, pour RetroArch, Eden, Eglantine, PCSX2, DuckStation et Dolphin (GameCube). Cemu, RPCS3, melonDS et Azahar se règlent pour l'instant dans l'émulateur.
+
+## Manette iPhone
+
+L'app iPhone (`ios/`, SwiftUI, projet généré par XcodeGen) reprend la manette Android en Wi-Fi seulement : iOS ne laisse pas une app se déclarer manette Bluetooth. Mêmes dispositions par console, silhouette ou jaquette en fond, styles de boutons, Personnaliser (glisser pour déplacer, pincer pour redimensionner), numéro de joueur, deuxième écran DS / Wii U (Windows).
+
+- **Installation :** installer SideStore sur l'iPhone, puis ouvrir `AetherPlay-iOS.ipa` avec SideStore. Avec un identifiant Apple gratuit, SideStore renouvelle l'app tous les 7 jours.
+- **Connexion :** même réseau Wi-Fi que l'ordinateur, ou l'ordinateur connecté au partage de connexion de l'iPhone (utile sur un réseau qui isole les appareils). L'adresse IP peut aussi être tapée à la main.
+- **Jeux :** les touches passent par la manette virtuelle d'AetherPlay (SteamOS, ou Windows avec ViGEmBus). Sur Mac, l'iPhone ne pilote que les menus.
 
 ## SteamOS : installation
 
