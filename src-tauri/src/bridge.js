@@ -44,14 +44,22 @@
       axes: s.axes,
       vibrationActuator: null,
     });
+    // While a game runs the library ignores controllers (they belong to the
+    // game: a button press here used to launch the game a second time).
+    let playing = false;
     navigator.getGamepads = () => {
+      if (playing) return [null, null, null, null];
       if (!windows) return [pad, null, null, null];
       const list = Array.from(native?.() ?? []);
       if (pad) list[list.length < 4 ? 3 : list.length] = pad;
       return list;
     };
-    const start = () =>
-      tauri().event.listen("aep-gamepad", ({ payload }) => {
+    const start = () => {
+      tauri().event.listen("launch-state", ({ payload }) => {
+        if (payload?.status === "running") playing = true;
+        else if (payload?.status === "exited" || payload?.status === "failed") playing = false;
+      });
+      return tauri().event.listen("aep-gamepad", ({ payload }) => {
         const wasConnected = !!pad;
         pad = payload.connected ? toGamepad(payload, windows ? 3 : 0) : null;
         if (pad && !wasConnected) {
@@ -60,6 +68,7 @@
           window.dispatchEvent(event);
         }
       });
+    };
     if (tauri()) start();
     else window.addEventListener("DOMContentLoaded", start, { once: true });
   }

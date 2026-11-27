@@ -45,6 +45,9 @@ class ServerRelay(private val context: Context) {
     val game: StateFlow<Game?> = _game
     private val _player = MutableStateFlow(0)
     val player: StateFlow<Int> = _player
+    /** Shown on the controller when RomM refuses to tell the running game (code made before 0.5.3). */
+    private val _problem = MutableStateFlow<String?>(null)
+    val problem: StateFlow<String?> = _problem
 
     val server: String? get() = prefs.getString("server", null)
     private val token: String? get() = prefs.getString("token", null)
@@ -67,6 +70,7 @@ class ServerRelay(private val context: Context) {
     fun unlink() {
         prefs.edit().remove("token").apply()
         _linked.value = false
+        _problem.value = null
         _game.value = null
         _player.value = 0
     }
@@ -94,11 +98,14 @@ class ServerRelay(private val context: Context) {
         }
     }
 
-    private fun get(path: String): String? {
-        val base = server ?: return null
-        val t = token ?: return null
+    private fun get(path: String): String? = fetch(path).second
+
+    /** HTTP status and body (null unless successful). */
+    private fun fetch(path: String): Pair<Int, String?> {
+        val base = server ?: return 0 to null
+        val t = token ?: return 0 to null
         val req = Request.Builder().url("$base$path").header("Authorization", "Bearer $t").build()
-        return http.newCall(req).execute().use { if (it.isSuccessful) it.body?.string() else null }
+        return http.newCall(req).execute().use { it.code to (if (it.isSuccessful) it.body?.string() else null) }
     }
 
     /** One round: game and player. Returns the cover key and bitmap to keep. */
@@ -111,7 +118,13 @@ class ServerRelay(private val context: Context) {
         _player.value = bluetoothName()?.let { players?.optInt(it, 0) } ?: 0
 
         // The user's most recent "now playing".
-        val activity = JSONArray(get("/api/activity") ?: "[]")
+        val (status, body) = fetch("/api/activity")
+        // Codes made before AetherPlay 0.5.3 lack the right to read "now playing".
+        _problem.value = if (status == 401 || status == 403) {
+            "Le serveur RomM ne donne pas le jeu en cours à ce téléphone : génère un nouveau code dans AetherPlay " +
+                "(Réglages > AetherPlay > Manette Android) et relie le téléphone au serveur à nouveau."
+        } else null
+        val activity = JSONArray(body ?: "[]")
         val mine = (0 until activity.length()).map { activity.getJSONObject(it) }
             .filter { it.optLong("user_id") == userId }
             .maxByOrNull { it.optString("started_at") }

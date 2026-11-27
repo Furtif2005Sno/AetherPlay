@@ -26,7 +26,7 @@ Les navigateurs, donc l'interface RomM, lisent ce rapport tel quel. Pour les ém
 ## Relais par le serveur RomM (Bluetooth seul)
 
 Quand le téléphone n'a pas de réseau commun avec l'ordinateur, c'est le serveur RomM qui fait le lien :
-- **Liaison, une seule fois :** AetherPlay crée pour le téléphone un jeton client RomM en lecture seule (`me.read`, `roms.read`, `platforms.read`, `devices.read`) et affiche son code d'appairage (`POST /api/client-tokens/{id}/pair`). L'app l'échange contre le jeton (`POST /api/client-tokens/exchange`). Le mot de passe ne quitte jamais l'ordinateur.
+- **Liaison, une seule fois :** AetherPlay crée pour le téléphone un jeton client RomM en lecture seule (`me.read`, `roms.read`, `roms.user.read`, `platforms.read`, `devices.read` ; `roms.user.read` sert à lire le « en train de jouer ») et affiche son code d'appairage (`POST /api/client-tokens/{id}/pair`). L'app l'échange contre le jeton (`POST /api/client-tokens/exchange`). Le mot de passe ne quitte jamais l'ordinateur.
 - **Jeu en cours :** pendant la partie, AetherPlay publie le « en train de jouer » de RomM (`POST /api/activity/heartbeat`, appareil RomM enregistré une fois, toutes les minutes, effacé à la fin). L'app lit `GET /api/activity` toutes les 4 secondes : console, nom du jeu, jaquette.
 - **Numéros de joueur :** dans `ui_settings.aetherplay.players` de l'utilisateur, sous la forme nom Bluetooth du téléphone → numéro. Sur Windows, ce sont les appareils connectés de classe « téléphone », appariés dans l'ordre aux manettes Android vues par l'émulateur.
 

@@ -154,7 +154,8 @@ impl Client {
     pub async fn phone_pairing_code(&self, name: &str) -> Result<(String, u64), String> {
         let body = serde_json::json!({
             "name": name,
-            "scopes": ["me.read", "roms.read", "platforms.read", "devices.read"],
+            // roms.user.read: RomM's "now playing" (GET /api/activity).
+            "scopes": ["me.read", "roms.read", "roms.user.read", "platforms.read", "devices.read"],
         });
         let token: serde_json::Value = self
             .send(self.json_request(reqwest::Method::POST, &["api", "client-tokens"]).json(&body))

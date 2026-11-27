@@ -98,6 +98,8 @@ fun PadScreen(
     onTouch: (Float, Float, Boolean) -> Unit = { _, _, _ -> },
     buttonStyle: ButtonStyle = ButtonStyle.ORIGINAL,
     onButtonStyle: (ButtonStyle) -> Unit = {},
+    /** A problem to show over the controller (e.g. the server link needs a new code). */
+    notice: String? = null,
 ) {
     val accent = Color(layout.accent)
     var editing by remember { mutableStateOf(false) }
@@ -175,7 +177,18 @@ fun PadScreen(
             IconButton(onClick = onSettings) { Icon(Icons.Filled.Settings, "Connexion", tint = Color.White) }
             Spacer(Modifier.width(235.dp))
         }
-        if (!editing && game != null && !bluetooth && !wifiInput) {
+        if (!editing && notice != null) {
+            Text(
+                notice,
+                color = Color.White,
+                fontSize = 13.sp,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = 6.dp, start = 80.dp, end = 80.dp)
+                    .background(Color(0xCCB3261E), RoundedCornerShape(12.dp))
+                    .padding(horizontal = 12.dp, vertical = 6.dp),
+            )
+        } else if (!editing && game != null && !bluetooth && !wifiInput) {
             Text(
                 "Les jeux ne reçoivent pas cette manette : connecte le téléphone en Bluetooth, " +
                     "ou sur Windows installe le pilote dans AetherPlay (Réglages > AetherPlay > Manette Android).",

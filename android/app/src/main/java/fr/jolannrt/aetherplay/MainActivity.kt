@@ -109,6 +109,7 @@ class MainActivity : ComponentActivity() {
             val relayLinked by Controller.relay.linked.collectAsState()
             val relayGame by Controller.relay.game.collectAsState()
             val relayPlayer by Controller.relay.player.collectAsState()
+            val relayProblem by Controller.relay.problem.collectAsState()
             LaunchedEffect(relayLinked, wifiUp) { Controller.relay.setActive(relayLinked && !wifiUp) }
             val btGame = when {
                 btLinkUp -> btLinkGame
@@ -201,6 +202,7 @@ class MainActivity : ComponentActivity() {
                     layout = layout,
                     player = player,
                     wifiInput = wifiInput,
+                    notice = relayProblem.takeIf { relayLinked && !wifiUp },
                     backdrop = backdrop,
                     buttonStyle = buttonStyle,
                     onButtonStyle = { buttonStyle = it; prefs.edit().putString("button_style", it.name).apply() },

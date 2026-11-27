@@ -188,6 +188,20 @@ fn path_vars(app: &AppHandle) -> Result<emulators::PathVars, String> {
 }
 
 /// Emits a `LaunchState` (RomM desktop bridge contract) for `rom_id`.
+/// Set from a launch until its game ends.
+static LAUNCHING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Frees `LAUNCHING` when a launch stops before its game runs (error).
+struct LaunchLock(bool);
+
+impl Drop for LaunchLock {
+    fn drop(&mut self) {
+        if self.0 {
+            LAUNCHING.store(false, std::sync::atomic::Ordering::SeqCst);
+        }
+    }
+}
+
 fn launch_state(app: &AppHandle, rom_id: u64, mut state: Value) {
     state["romId"] = json!(rom_id);
     let _ = app.emit("launch-state", state);
@@ -210,6 +224,13 @@ struct LaunchResult {
 /// Downloads the ROM if needed, restores its save, then starts the matching
 /// emulator; uploads the save once it exits. Progress goes out as `launch-state`.
 async fn launch(app: AppHandle, rom_id: u64, fullscreen: bool) -> Result<LaunchResult, LaunchError> {
+    // One game at a time: a controller button reaching the library while a
+    // game starts or runs must not launch it again.
+    if LAUNCHING.swap(true, std::sync::atomic::Ordering::SeqCst) {
+        shell::log(&app, &format!("launch rom={rom_id}: ignoré, un jeu est déjà lancé"));
+        return Err(LaunchError { code: "launch-failed", message: "Un jeu est déjà lancé".into() });
+    }
+    let mut lock = LaunchLock(true);
     let fail = |code: &'static str, message: String| {
         shell::log(&app, &format!("launch rom={rom_id}: échec {code} : {message}"));
         launch_state(&app, rom_id, json!({ "status": "failed", "error": { "code": code, "message": message } }));
@@ -431,6 +452,8 @@ async fn launch(app: AppHandle, rom_id: u64, fullscreen: bool) -> Result<LaunchR
         })
         .map_err(|e| fail("launch-failed", e))?;
     gamepad::set_running(child.id());
+    // Released when the game ends (below), no longer when this returns.
+    lock.0 = false;
     launch_state(&app, rom_id, json!({ "status": "running" }));
     if dual && let Some(pid) = child.id() {
         shell::log(&app, "second écran : envoi vers le téléphone");
@@ -444,6 +467,7 @@ async fn launch(app: AppHandle, rom_id: u64, fullscreen: bool) -> Result<LaunchR
     tauri::async_runtime::spawn(async move {
         let code = child.wait().await.ok().and_then(|s| s.code());
         gamepad::set_running(None);
+        LAUNCHING.store(false, std::sync::atomic::Ordering::SeqCst);
         if dual {
             dualscreen::stop();
         }
