@@ -45,6 +45,13 @@ pub fn set_running(pid: Option<u32>) {
     *RUNNING.lock().expect("running lock") = pid;
 }
 
+/// Names of the controllers gilrs sees (XInput ones on Windows), for the settings.
+static SEEN: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
+pub fn connected_pads() -> Vec<String> {
+    SEEN.lock().expect("seen lock").clone()
+}
+
 pub fn is_running() -> bool {
     RUNNING.lock().expect("running lock").is_some()
 }
@@ -154,6 +161,13 @@ pub fn spawn_watcher(app: AppHandle) {
         let mut sent = PadState::default();
         loop {
             while gilrs.next_event_blocking(Some(Duration::from_millis(16))).is_some() {}
+            {
+                let names: Vec<String> = gilrs.gamepads().map(|(_, g)| g.name().to_string()).collect();
+                let mut seen = SEEN.lock().expect("seen lock");
+                if *seen != names {
+                    *seen = names;
+                }
+            }
             let phone_combo = remote(false).iter().any(|(b, _)| b & (1 << 8) != 0 && b & (1 << 9) != 0);
             let combo = phone_combo
                 || gilrs.gamepads().any(|(_, g)| g.is_pressed(Button::Select) && g.is_pressed(Button::Start));

@@ -1,11 +1,17 @@
 //! Save sync with RomM.
 //!
-//! Before a session the latest save for (rom, emulator) is restored into the
-//! emulator's save directories, unless the local copy is newer. After the
-//! session every file modified meanwhile is added to the game's save set and
-//! the set is uploaded: as-is when it is a single top-level file (e.g. a
-//! RetroArch `.srm`, usable by RomM's web player), otherwise as a zip whose
-//! entries are `<save dir index>/<relative path>`.
+//! RomM holds the reference copy of every save, on every OS:
+//! * before a session the latest save for (rom, emulator) replaces the local
+//!   files when they differ; each replaced local file is first copied to
+//!   `save-backups/` in AetherPlay's data folder;
+//! * after the session every file modified meanwhile is added to the game's
+//!   save set and the set is uploaded: as-is when it is a single top-level file
+//!   (e.g. a RetroArch `.srm`, usable by RomM's web player), otherwise as a zip
+//!   whose entries are `<save dir index>/<relative path>`; the size RomM
+//!   stored is checked;
+//! * an upload that failed stays pending: it is retried before the next
+//!   session, and until it succeeds the local save is never replaced (it is
+//!   newer than RomM's).
 
 use crate::romm::{Client, Rom, SaveUpload};
 use std::{
@@ -49,7 +55,26 @@ impl Index {
     fn entry(&mut self, rom_id: u64, emu: &str) -> &mut BTreeSet<String> {
         self.map.entry(format!("{rom_id}:{emu}")).or_default()
     }
+
+    /// Games whose last upload failed (kept under a reserved key, so older
+    /// index files still load).
+    pub fn pending(&self, rom_id: u64, emu: &str) -> bool {
+        self.map.get(PENDING).is_some_and(|s| s.contains(&format!("{rom_id}:{emu}")))
+    }
+
+    pub fn set_pending(&mut self, rom_id: u64, emu: &str, pending: bool) -> Result<(), String> {
+        let set = self.map.entry(PENDING.to_string()).or_default();
+        let key = format!("{rom_id}:{emu}");
+        if pending {
+            set.insert(key);
+        } else {
+            set.remove(&key);
+        }
+        self.save()
+    }
 }
+
+const PENDING: &str = "__pending_uploads__";
 
 /// `"<idx>/<a/b/c>"` -> absolute path inside `dirs[idx]`, rejecting traversal.
 fn resolve(dirs: &[PathBuf], key: &str) -> Option<PathBuf> {
@@ -105,16 +130,39 @@ fn modified(p: &Path) -> Option<SystemTime> {
     std::fs::metadata(p).ok()?.modified().ok()
 }
 
-/// Writes `data` to `target` unless the local file is newer than the remote save.
-fn write_if_newer(target: &Path, data: &[u8], remote: SystemTime) -> Result<bool, String> {
-    if modified(target).is_some_and(|local| local > remote) {
-        return Ok(false);
+/// What putting RomM's copy of one file in place did.
+#[derive(Debug, PartialEq)]
+enum Placed {
+    /// Same content already there.
+    Same,
+    /// Written where there was no file.
+    Created,
+    /// Local file replaced (its old content copied to the backup folder).
+    Replaced,
+}
+
+/// Puts RomM's `data` at `target`. A different local file is first copied to
+/// `backup/<key>`, so nothing is lost if RomM's copy was the wrong one.
+fn place(target: &Path, key: &str, data: &[u8], backup: &Path) -> Result<Placed, String> {
+    let existing = std::fs::read(target).ok();
+    if existing.as_deref() == Some(data) {
+        return Ok(Placed::Same);
+    }
+    if let Some(old) = &existing {
+        let copy = backup.join(key.replace('/', std::path::MAIN_SEPARATOR_STR));
+        if let Some(dir) = copy.parent() {
+            std::fs::create_dir_all(dir).map_err(err)?;
+        }
+        std::fs::write(&copy, old).map_err(err)?;
     }
     if let Some(dir) = target.parent() {
         std::fs::create_dir_all(dir).map_err(err)?;
     }
-    std::fs::write(target, data).map_err(err)?;
-    Ok(true)
+    // Written beside then renamed: a crash never leaves half a save.
+    let tmp = target.with_extension("aetherplay-tmp");
+    std::fs::write(&tmp, data).map_err(err)?;
+    std::fs::rename(&tmp, target).map_err(err)?;
+    Ok(if existing.is_some() { Placed::Replaced } else { Placed::Created })
 }
 
 /// Downloads the latest RomM save for this game/emulator and puts it in place.
@@ -122,8 +170,7 @@ fn write_if_newer(target: &Path, data: &[u8], remote: SystemTime) -> Result<bool
 /// single_file_as: for emulators keeping one save file per game named after
 /// the ROM (RetroArch: <rom stem>.srm), any raw save RomM holds for the game
 /// (e.g. from its web player) is accepted too, and written under that name.
-/// orce writes even over newer local files (used for a deferred restore,
-/// over the blank save a first session created).
+/// backup: folder receiving the local files RomM's copy replaces.
 pub struct Restored {
     /// One-line description, for the diagnostic log.
     pub message: String,
@@ -138,7 +185,7 @@ pub async fn restore(
     emu: &str,
     dirs: &[PathBuf],
     single_file_as: Option<&str>,
-    force: bool,
+    backup: &Path,
     index: &mut Index,
 ) -> Result<Restored, String> {
     let saves = client.saves(rom.id).await?;
@@ -152,20 +199,22 @@ pub async fn restore(
         return Ok(Restored { message: format!("aucune sauvegarde utilisable sur RomM ({total} pour ce jeu)"), deferred: false });
     };
     let data = client.save_content(save.id).await?;
-    let remote: SystemTime = save.updated_at.into();
+    if data.is_empty() {
+        return Err(format!("« {} » est vide sur RomM : copie locale gardée", save.file_name));
+    }
     let mut keys = Vec::new();
-    let mut written = 0;
+    let (mut written, mut replaced) = (0, 0);
     let mut no_profile = 0;
-    let write = |target: &Path, data: &[u8]| -> Result<bool, String> {
-        if force {
-            if let Some(dir) = target.parent() {
-                std::fs::create_dir_all(dir).map_err(err)?;
+    let mut write = |target: &Path, key: &str, data: &[u8]| -> Result<(), String> {
+        match place(target, key, data, backup)? {
+            Placed::Same => {}
+            Placed::Created => written += 1,
+            Placed::Replaced => {
+                written += 1;
+                replaced += 1;
             }
-            std::fs::write(target, data).map_err(err)?;
-            Ok(true)
-        } else {
-            write_if_newer(target, data, remote)
         }
+        Ok(())
     };
 
     if save.file_name.starts_with(ZIP_PREFIX) && save.file_name.ends_with(".zip") {
@@ -184,7 +233,7 @@ pub async fn restore(
             let Some(target) = resolve(dirs, &key) else { continue };
             let mut buf = Vec::with_capacity(file.size() as usize);
             file.read_to_end(&mut buf).map_err(err)?;
-            written += usize::from(write(&target, &buf)?);
+            write(&target, &key, &buf)?;
             keys.push(key);
         }
     } else {
@@ -198,7 +247,7 @@ pub async fn restore(
         };
         let key = format!("0/{name}");
         if let Some(target) = resolve(dirs, &key) {
-            written += usize::from(write(&target, &data)?);
+            write(&target, &key, &data)?;
             keys.push(key);
         }
     }
@@ -207,9 +256,10 @@ pub async fn restore(
     let message = if no_profile > 0 {
         format!("« {} » : profil de l'émulateur absent ici, restauration reportée à la fin de la partie", save.file_name)
     } else if written > 0 {
-        format!("« {} » ({}) restaurée : {written} fichier(s)", save.file_name, save.emulator.unwrap_or_default())
+        let backed = if replaced > 0 { format!(", {replaced} copie(s) locale(s) mise(s) de côté dans {}", backup.display()) } else { String::new() };
+        format!("« {} » ({}) restaurée : {written} fichier(s){backed}", save.file_name, save.emulator.unwrap_or_default())
     } else {
-        format!("« {} » plus ancienne que la copie locale : gardée telle quelle", save.file_name)
+        format!("« {} » : copie locale déjà identique", save.file_name)
     };
     Ok(Restored { message, deferred: no_profile > 0 })
 }
@@ -239,8 +289,9 @@ fn changed_since(dirs: &[PathBuf], since: SystemTime) -> Vec<String> {
     out
 }
 
-/// Uploads the game's save set if the session changed anything.
-/// Returns `false` when there was nothing to upload.
+/// Uploads the game's save set if the session changed anything (`started`:
+/// session start), or the whole set as it is (`None`: retry of a failed
+/// upload). Returns `false` when there was nothing to upload.
 #[allow(clippy::too_many_arguments)]
 pub async fn upload(
     client: &Client,
@@ -249,24 +300,32 @@ pub async fn upload(
     core: Option<&str>,
     dirs: &[PathBuf],
     rom_root: &Path,
-    started: SystemTime,
+    started: Option<SystemTime>,
     index: &mut Index,
 ) -> Result<bool, String> {
-    // File timestamps are coarser than SystemTime::now() on Windows (~16 ms ticks).
-    let since = started - std::time::Duration::from_secs(1);
-    let changed: Vec<String> = changed_since(dirs, since)
-        .into_iter()
-        // Never treat the ROM itself (file or extracted folder) as a save.
-        .filter(|k| resolve(dirs, k).is_some_and(|p| !p.starts_with(rom_root)))
-        .collect();
-    if changed.is_empty() {
-        return Ok(false);
-    }
-    let set = index.entry(rom.id, emu);
-    set.extend(changed);
+    let set = if let Some(started) = started {
+        // File timestamps are coarser than SystemTime::now() on Windows (~16 ms ticks).
+        let since = started - std::time::Duration::from_secs(1);
+        let changed: Vec<String> = changed_since(dirs, since)
+            .into_iter()
+            // Never treat the ROM itself (file or extracted folder) as a save.
+            .filter(|k| resolve(dirs, k).is_some_and(|p| !p.starts_with(rom_root)))
+            .collect();
+        if changed.is_empty() {
+            return Ok(false);
+        }
+        let set = index.entry(rom.id, emu);
+        set.extend(changed);
+        set
+    } else {
+        index.entry(rom.id, emu)
+    };
     set.retain(|k| resolve(dirs, k).is_some_and(|p| p.is_file()));
     let keys: Vec<String> = set.iter().cloned().collect();
     index.save()?;
+    if keys.is_empty() {
+        return Ok(false);
+    }
 
     let (file_name, data) = match keys.as_slice() {
         [single] if single.starts_with("0/") && !single[2..].contains('/') => {
@@ -285,9 +344,16 @@ pub async fn upload(
             (format!("{ZIP_PREFIX}{emu}.zip"), zip.finish().map_err(err)?.into_inner())
         }
     };
-    client
+    let size = data.len() as u64;
+    let stored = client
         .upload_save(SaveUpload { rom_id: rom.id, emulator: emu, core, slot: SLOT, file_name: &file_name }, data)
         .await?;
+    // RomM answers with what it stored: an empty or truncated file is a failure.
+    if let Some(stored) = stored
+        && stored != size
+    {
+        return Err(format!("RomM a reçu {stored} octets au lieu de {size}"));
+    }
     Ok(true)
 }
 
@@ -316,6 +382,41 @@ mod tests {
             format!("0/0000000000000000/{pc_profile}/0400A3A01EE4C000/G00/STGDAT01.BIN")
         );
         std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn server_copy_replaces_local_and_keeps_a_backup() {
+        let root = std::env::temp_dir().join(format!("aep-place-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let (target, backup) = (root.join("saves/Game.srm"), root.join("backup"));
+        // No local file: created.
+        assert_eq!(place(&target, "0/Game.srm", b"server v1", &backup).unwrap(), Placed::Created);
+        // Same content: untouched, nothing backed up.
+        assert_eq!(place(&target, "0/Game.srm", b"server v1", &backup).unwrap(), Placed::Same);
+        assert!(!backup.exists());
+        // Different local content: backed up, then replaced by the server copy.
+        std::fs::write(&target, b"local progress").unwrap();
+        assert_eq!(place(&target, "0/Game.srm", b"server v2", &backup).unwrap(), Placed::Replaced);
+        assert_eq!(std::fs::read(&target).unwrap(), b"server v2");
+        assert_eq!(std::fs::read(backup.join("0").join("Game.srm")).unwrap(), b"local progress");
+        assert!(!target.with_extension("aetherplay-tmp").exists());
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn failed_uploads_stay_pending_across_restarts() {
+        let file = std::env::temp_dir().join(format!("aep-index-{}.json", std::process::id()));
+        let _ = std::fs::remove_file(&file);
+        let mut index = Index::load(file.clone());
+        index.entry(7, "retroarch").insert("0/Game.srm".into());
+        index.set_pending(7, "retroarch", true).unwrap();
+        let reloaded = Index::load(file.clone());
+        assert!(reloaded.pending(7, "retroarch"));
+        assert!(!reloaded.pending(7, "eden"));
+        let mut reloaded = reloaded;
+        reloaded.set_pending(7, "retroarch", false).unwrap();
+        assert!(!Index::load(file.clone()).pending(7, "retroarch"));
+        std::fs::remove_file(&file).unwrap();
     }
 
     #[test]

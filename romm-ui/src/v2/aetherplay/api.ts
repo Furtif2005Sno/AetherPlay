@@ -59,6 +59,8 @@ export interface PhoneStatus {
   os: "windows" | "macos" | "linux";
   /** This computer's IPv4 addresses, to type on the phone if needed. */
   addresses: string[];
+  /** Controllers AetherPlay reads itself (gilrs). */
+  pads: string[];
 }
 
 export const app = {

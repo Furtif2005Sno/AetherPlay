@@ -317,10 +317,31 @@ async fn launch(app: AppHandle, rom_id: u64, fullscreen: bool) -> Result<LaunchR
         .then(|| target.file_stem().map(|s| format!("{}.srm", s.to_string_lossy())))
         .flatten();
     let mut deferred = false;
-    if !save_dirs.is_empty() {
+    // Local files replaced by RomM's copy are kept here first.
+    let backup = data_dir
+        .join("save-backups")
+        .join(format!("{rom_id}-{}", emu.id))
+        .join(chrono::Local::now().format("%Y-%m-%d_%H-%M-%S").to_string());
+    // A previous upload failed: the local save is newer than RomM's. Send it
+    // first; while that fails, keep it (never replace it with RomM's copy).
+    let mut keep_local = false;
+    if !save_dirs.is_empty() && index.pending(rom.id, &emu.id) {
+        let core = emu.core(&rom.platform_slug);
+        match saves::upload(&client, &rom, &emu.id, core, &save_dirs, &dest, None, &mut index).await {
+            Ok(_) => {
+                let _ = index.set_pending(rom.id, &emu.id, false);
+                shell::log(&app, &format!("sync rom={rom_id}: envoi en attente réussi"));
+            }
+            Err(e) => {
+                keep_local = true;
+                shell::log(&app, &format!("sync rom={rom_id}: envoi en attente toujours impossible ({e}) : copie locale gardée"));
+            }
+        }
+    }
+    if !save_dirs.is_empty() && !keep_local {
         launch_state(&app, rom_id, json!({ "status": "downloading", "stage": "save" }));
         // A failed restore must not block playing; the page is told.
-        let action = match saves::restore(&client, &rom, &emu.id, &save_dirs, single_file_as.as_deref(), false, &mut index).await {
+        let action = match saves::restore(&client, &rom, &emu.id, &save_dirs, single_file_as.as_deref(), &backup, &mut index).await {
             Ok(restored) => {
                 shell::log(&app, &format!("sync rom={rom_id}: restauration : {}", restored.message));
                 deferred = restored.deferred;
@@ -404,7 +425,7 @@ async fn launch(app: AppHandle, rom_id: u64, fullscreen: bool) -> Result<LaunchR
             // First run of the game on this machine: the emulator profile now
             // exists, so put RomM's save in place over the blank one, and do not
             // upload that blank session.
-            let what = match saves::restore(&client, &rom, &emu.id, &save_dirs, single_file_as.as_deref(), true, &mut index).await {
+            let what = match saves::restore(&client, &rom, &emu.id, &save_dirs, single_file_as.as_deref(), &backup, &mut index).await {
                 Ok(r) => r.message,
                 Err(e) => format!("échec : {e}"),
             };
@@ -413,8 +434,9 @@ async fn launch(app: AppHandle, rom_id: u64, fullscreen: bool) -> Result<LaunchR
             return;
         }
         let core = emu.core(&rom.platform_slug);
-        let action = match saves::upload(&client, &rom, &emu.id, core, &save_dirs, &dest, started, &mut index).await {
+        let action = match saves::upload(&client, &rom, &emu.id, core, &save_dirs, &dest, Some(started), &mut index).await {
             Ok(true) => {
+                let _ = index.set_pending(rom.id, &emu.id, false);
                 shell::log(&app2, &format!("sync rom={rom_id}: sauvegarde envoyée sur RomM"));
                 Some(json!({ "action": "uploaded", "slot": saves::SLOT }))
             }
@@ -424,7 +446,10 @@ async fn launch(app: AppHandle, rom_id: u64, fullscreen: bool) -> Result<LaunchR
                 None
             }
             Err(e) => {
-                shell::log(&app2, &format!("sync rom={rom_id}: envoi échoué : {e}"));
+                // Retried before the next session; until then RomM's older copy
+                // never replaces this one.
+                let _ = index.set_pending(rom.id, &emu.id, true);
+                shell::log(&app2, &format!("sync rom={rom_id}: envoi échoué, réessayé au prochain lancement : {e}"));
                 Some(json!({ "action": "failed", "slot": saves::SLOT, "detail": e }))
             }
         };
@@ -529,6 +554,48 @@ fn open_log(app: AppHandle) -> Result<(), String> {
     tauri_plugin_opener::reveal_item_in_dir(file).map_err(|e| e.to_string())
 }
 
+/// Uploads from the interface (saves, states, covers…): webviews do not hand
+/// file contents to the `romm://` handler (RomM received 0-byte files), so
+/// bridge.js sends the encoded multipart body here, relayed like any request.
+#[tauri::command]
+async fn proxy_upload(app: AppHandle, request: tauri::ipc::Request<'_>) -> Result<serde_json::Value, String> {
+    use base64::Engine;
+    let tauri::ipc::InvokeBody::Raw(body) = request.body() else {
+        return Err("corps de requête attendu".into());
+    };
+    let headers = request.headers();
+    let get = |k: &str| headers.get(k).and_then(|v| v.to_str().ok()).unwrap_or_default().to_string();
+    let url = get("x-aep-url");
+    if !url.starts_with("/api/") {
+        return Err("adresse refusée".into());
+    }
+    let page_headers: std::collections::HashMap<String, String> =
+        serde_json::from_str(&get("x-aep-headers")).unwrap_or_default();
+    let mut req = tauri::http::Request::builder().method(get("x-aep-method").as_str()).uri(url.as_str());
+    for (k, v) in &page_headers {
+        if !k.eq_ignore_ascii_case("content-type") {
+            req = req.header(k.as_str(), v.as_str());
+        }
+    }
+    let content_type = get("x-aep-content-type");
+    if !content_type.is_empty() {
+        req = req.header("content-type", content_type);
+    }
+    let req = req.body(body.clone()).map_err(|e| e.to_string())?;
+    shell::log(&app, &format!("envoi depuis l'interface : {url} ({} octets)", body.len()));
+    let res = shell::handle(&app, req).await;
+    let headers: serde_json::Map<String, serde_json::Value> = res
+        .headers()
+        .iter()
+        .filter_map(|(k, v)| Some((k.to_string(), serde_json::Value::String(v.to_str().ok()?.to_string()))))
+        .collect();
+    Ok(serde_json::json!({
+        "status": res.status().as_u16(),
+        "headers": headers,
+        "body": base64::engine::general_purpose::STANDARD.encode(res.body()),
+    }))
+}
+
 /// Size of the cover / screenshot cache (bytes).
 #[tauri::command]
 fn image_cache_size(app: AppHandle) -> u64 {
@@ -627,6 +694,7 @@ pub fn run() {
             phone_forget,
             image_cache_size,
             image_cache_clear,
+            proxy_upload,
             install_vigem
         ])
         .run(tauri::generate_context!())

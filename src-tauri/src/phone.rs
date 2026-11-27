@@ -94,6 +94,8 @@ pub fn status() -> Value {
         "virtual": virtual_pad::available(),
         // To type on the phone when it cannot find AetherPlay by itself.
         "addresses": addresses(),
+        // Controllers AetherPlay sees (gilrs), Bluetooth phones included on macOS / Linux.
+        "pads": gamepad::connected_pads(),
         "os": crate::emulators::CURRENT_OS,
     })
 }

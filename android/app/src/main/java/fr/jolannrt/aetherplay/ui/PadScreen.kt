@@ -125,9 +125,10 @@ fun PadScreen(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Spacer(Modifier.width(235.dp))
-            if (player > 0) {
+            if (player > 0 || bluetooth) {
                 Text(
-                    "J$player",
+                    // Bluetooth alone: the emulator numbers players by connection order.
+                    if (player > 0) "J$player" else "BT",
                     color = Color.Black,
                     fontSize = 13.sp,
                     fontWeight = FontWeight.Bold,

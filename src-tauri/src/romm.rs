@@ -156,7 +156,8 @@ impl Client {
         Ok(self.send(self.get(url)).await?.bytes().await.map_err(err)?.to_vec())
     }
 
-    pub async fn upload_save(&self, up: SaveUpload<'_>, data: Vec<u8>) -> Result<(), String> {
+    /// Uploads a save; returns the size RomM says it stored, when it says.
+    pub async fn upload_save(&self, up: SaveUpload<'_>, data: Vec<u8>) -> Result<Option<u64>, String> {
         let mut url = self.url(&["api", "saves"]);
         {
             let mut q = url.query_pairs_mut();
@@ -173,7 +174,9 @@ impl Client {
         let part = reqwest::multipart::Part::bytes(data).file_name(up.file_name.to_string());
         let form = reqwest::multipart::Form::new().part("saveFile", part);
         let req = self.http.post(url).basic_auth(&self.user, Some(&self.pass)).multipart(form);
-        self.send(req).await.map(|_| ())
+        let res = self.send(req).await?;
+        let body: serde_json::Value = res.json().await.unwrap_or_default();
+        Ok(body.get("file_size_bytes").and_then(serde_json::Value::as_u64))
     }
 
 }

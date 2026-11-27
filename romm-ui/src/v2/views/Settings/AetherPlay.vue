@@ -26,8 +26,23 @@ const error = ref("");
 let unlisten: (() => void) | undefined;
 const phone = ref<PhoneStatus | null>(null);
 let phoneTimer: ReturnType<typeof setInterval> | undefined;
+/** A controller seen on this computer; `phone`: the Android app over Bluetooth. */
+interface DetectedPad {
+  name: string;
+  phone: boolean;
+}
+const detected = ref<DetectedPad[]>([]);
+
 const refreshPhone = async () => {
   phone.value = await app.phoneStatus();
+  // The webview's own list (Windows: every controller, after a button press),
+  // plus what AetherPlay reads itself. The Android app's Bluetooth controller
+  // has its own report layout: 17 buttons, 4 axes.
+  const native = (
+    (window as unknown as { __aetherplayNativeGamepads?: () => Gamepad[] }).__aetherplayNativeGamepads?.() ?? []
+  ).map((p) => ({ name: p.id.replace(/\s*\(.*\)\s*$/, "") || p.id, phone: p.buttons.length === 17 && p.axes.length === 4 }));
+  const seen = new Set(native.map((p) => p.name));
+  detected.value = [...native, ...phone.value.pads.filter((n) => !seen.has(n)).map((name) => ({ name, phone: false }))];
 };
 const installingVigem = ref(false);
 async function installVigem() {
@@ -248,6 +263,19 @@ onUnmounted(() => {
         >
           Installer le pilote
         </RBtn>
+      </div>
+      <div class="aep-row">
+        <div class="aep-row__info">
+          <div class="aep-row__title">Manettes détectées</div>
+          <div v-for="(p, i) in detected" :key="i" class="aep-muted">
+            <span class="aep-tag">{{ p.phone ? "Android · Bluetooth" : "manette" }}</span> {{ p.name }}
+          </div>
+          <div class="aep-muted">
+            {{ detected.length ? "" : "Aucune pour l'instant. " }}Une manette Bluetooth apparaît après un appui sur l'un de
+            ses boutons. En Bluetooth seul, l'émulateur numérote les joueurs dans l'ordre de connexion des manettes ;
+            pour J1 / J2 garantis, connecte aussi les téléphones en Wi-Fi (ou partage de connexion USB).
+          </div>
+        </div>
       </div>
       <div v-for="p in phone.phones" :key="p.player" class="aep-row">
         <div class="aep-row__info">
