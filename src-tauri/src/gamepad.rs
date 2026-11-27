@@ -45,7 +45,7 @@ pub fn set_running(pid: Option<u32>) {
     *RUNNING.lock().expect("running lock") = pid;
 }
 
-fn is_running() -> bool {
+pub fn is_running() -> bool {
     RUNNING.lock().expect("running lock").is_some()
 }
 

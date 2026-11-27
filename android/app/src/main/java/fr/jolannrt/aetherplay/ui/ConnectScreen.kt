@@ -84,6 +84,14 @@ fun ConnectScreen(
             Spacer(Modifier.height(8.dp))
             if (servers.isEmpty()) {
                 Line("Recherche d'AetherPlay… (même réseau Wi-Fi que l'ordinateur, AetherPlay ouvert)", Muted)
+                Spacer(Modifier.height(6.dp))
+                Line(
+                    "Réseau d'école ou public ? Les appareils y sont souvent isolés. Branche le téléphone en USB et active " +
+                        "le partage de connexion USB (ou connecte l'ordinateur au point d'accès du téléphone), puis tape " +
+                        "l'adresse affichée dans AetherPlay (Réglages > AetherPlay > Manette Android) ci-dessous. " +
+                        "Le Bluetooth, lui, marche sur tous les réseaux.",
+                    Color(0xFFFFB84D),
+                )
             }
             servers.forEach { s ->
                 Row(

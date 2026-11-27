@@ -4,6 +4,7 @@ import android.annotation.SuppressLint
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothHidDevice
+import android.bluetooth.BluetoothHidDeviceAppQosSettings
 import android.bluetooth.BluetoothHidDeviceAppSdpSettings
 import android.bluetooth.BluetoothManager
 import android.bluetooth.BluetoothProfile
@@ -12,6 +13,7 @@ import fr.jolannrt.aetherplay.pad.PadState
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 
 /**
  * The phone as a Bluetooth controller (HID device profile, Android 9+): the
@@ -37,7 +39,10 @@ class HidGamepad(private val context: Context) {
         (context.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager)?.adapter
     private var hid: BluetoothHidDevice? = null
     private var host: BluetoothDevice? = null
-    private val executor = Executors.newSingleThreadExecutor()
+    private val executor = Executors.newSingleThreadScheduledExecutor()
+    /** Set while the profile is wanted (between start and stop): reconnect on drops. */
+    @Volatile private var active = false
+    @Volatile private var last = PadState.IDLE
 
     private val callback = object : BluetoothHidDevice.Callback() {
         override fun onAppStatusChanged(pluggedDevice: BluetoothDevice?, registered: Boolean) {
@@ -61,12 +66,19 @@ class HidGamepad(private val context: Context) {
                 BluetoothProfile.STATE_DISCONNECTED -> {
                     if (host == device) host = null
                     if (_status.value is Status.Connected) _status.value = Status.Ready
+                    // Dropped (sleep, range, Windows power saving): call the computer back.
+                    if (active && device.address == lastHost()?.address) {
+                        executor.schedule({ if (active && host == null) hid?.connect(device) }, 3, TimeUnit.SECONDS)
+                    }
                 }
             }
         }
     }
 
     fun start() {
+        // Already registered: keep the link (re-registering drops the computer).
+        if (active && hid != null) return
+        active = true
         val a = adapter ?: run {
             _status.value = Status.Unavailable("Pas de Bluetooth sur ce téléphone")
             return
@@ -82,7 +94,12 @@ class HidGamepad(private val context: Context) {
                     NAME, "Manette AetherPlay", "AetherPlay",
                     BluetoothHidDevice.SUBCLASS2_GAMEPAD, DESCRIPTOR,
                 )
-                if (!proxy.registerApp(sdp, null, null, executor, callback)) {
+                // Steady reports channel: Windows keeps the link instead of dropping it.
+                val qos = BluetoothHidDeviceAppQosSettings(
+                    BluetoothHidDeviceAppQosSettings.SERVICE_BEST_EFFORT, 800, 9, 0, 11250,
+                    BluetoothHidDeviceAppQosSettings.MAX,
+                )
+                if (!proxy.registerApp(sdp, null, qos, executor, callback)) {
                     _status.value = Status.Unavailable("Mode manette Bluetooth indisponible sur ce téléphone")
                 }
             }
@@ -96,6 +113,7 @@ class HidGamepad(private val context: Context) {
     }
 
     fun stop() {
+        active = false
         hid?.let {
             host?.let { h -> it.disconnect(h) }
             it.unregisterApp()
@@ -107,8 +125,18 @@ class HidGamepad(private val context: Context) {
 
     /** Sends the state to the computer; false when no computer is connected. */
     fun send(state: PadState): Boolean {
+        last = state
         val h = host ?: return false
         return hid?.sendReport(h, REPORT_ID, state.hidReport()) == true
+    }
+
+    init {
+        // Keep-alive: repeat the current state every 2 s, so an idle controller
+        // is not dropped by the computer.
+        executor.scheduleWithFixedDelay({
+            val h = host
+            if (active && h != null) runCatching { hid?.sendReport(h, REPORT_ID, last.hidReport()) }
+        }, 2, 2, TimeUnit.SECONDS)
     }
 
     private fun prefs() = context.getSharedPreferences("bt", Context.MODE_PRIVATE)

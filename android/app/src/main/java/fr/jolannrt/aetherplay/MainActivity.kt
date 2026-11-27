@@ -11,6 +11,11 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import kotlinx.coroutines.launch
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -21,7 +26,6 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import fr.jolannrt.aetherplay.bt.HidGamepad
-import fr.jolannrt.aetherplay.net.Discovery
 import fr.jolannrt.aetherplay.net.Link
 import fr.jolannrt.aetherplay.net.Server
 import fr.jolannrt.aetherplay.pad.PadState
@@ -32,15 +36,19 @@ import fr.jolannrt.aetherplay.ui.ConnectScreen
 import fr.jolannrt.aetherplay.ui.PadScreen
 
 class MainActivity : ComponentActivity() {
-    private lateinit var discovery: Discovery
-    private val link = Link()
-    private lateinit var hid: HidGamepad
+    // The links live in Controller, kept running by ControllerService.
+    private val discovery get() = Controller.discovery
+    private val link get() = Controller.link
+    private val hid get() = Controller.hid
     private lateinit var tweakStore: TweakStore
 
-    private val btPermissions = if (Build.VERSION.SDK_INT >= 31) {
-        arrayOf(Manifest.permission.BLUETOOTH_CONNECT, Manifest.permission.BLUETOOTH_ADVERTISE)
-    } else {
-        emptyArray()
+    private val btPermissions = buildList {
+        if (Build.VERSION.SDK_INT >= 31) {
+            add(Manifest.permission.BLUETOOTH_CONNECT)
+            add(Manifest.permission.BLUETOOTH_ADVERTISE)
+        }
+        // The "manette connectée" notification of the background service.
+        if (Build.VERSION.SDK_INT >= 33) add(Manifest.permission.POST_NOTIFICATIONS)
     }
 
     private val askPermissions = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
@@ -58,8 +66,7 @@ class MainActivity : ComponentActivity() {
             systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
         }
 
-        discovery = Discovery(this)
-        hid = HidGamepad(this)
+        Controller.init(this)
         tweakStore = TweakStore(this)
         val prefs = getSharedPreferences("link", MODE_PRIVATE)
         val deviceName = "${Build.MANUFACTURER} ${Build.MODEL}".trim()
@@ -115,6 +122,39 @@ class MainActivity : ComponentActivity() {
                     servers.firstOrNull { it.name == last }?.let { connect(it) }
                 }
             }
+            // Update of the app from the GitHub releases, offered once per start.
+            var update by remember { mutableStateOf<AppUpdate.Release?>(null) }
+            var updating by remember { mutableStateOf(false) }
+            val scope = rememberCoroutineScope()
+            LaunchedEffect(Unit) { if (preview == null) update = AppUpdate.check(this@MainActivity) }
+            update?.let { release ->
+                AlertDialog(
+                    onDismissRequest = { update = null },
+                    title = { Text("Mise à jour disponible") },
+                    text = { Text(if (updating) "Téléchargement de la version ${release.version}…" else "La version ${release.version} de l'app AetherPlay est disponible.") },
+                    confirmButton = {
+                        TextButton(enabled = !updating, onClick = {
+                            updating = true
+                            scope.launch {
+                                runCatching { AppUpdate.install(this@MainActivity, release) }
+                                updating = false
+                                update = null
+                            }
+                        }) { Text("Installer") }
+                    },
+                    dismissButton = { TextButton(onClick = { update = null }) { Text("Plus tard") } },
+                )
+            }
+            // One controller per phone: AetherPlay's virtual one when it can create
+            // it (Bluetooth would add an idle player), else the Bluetooth one.
+            val useBluetooth by link.useBluetooth.collectAsState()
+            LaunchedEffect(useBluetooth) {
+                when (useBluetooth) {
+                    false -> hid.stop()
+                    true -> startBluetooth()
+                    null -> {}
+                }
+            }
             // Straight to the controller once something is connected.
             LaunchedEffect(linkStatus, btStatus) {
                 if (linkStatus is Link.Status.Connected || btStatus is HidGamepad.Status.Connected) showPad = true
@@ -155,35 +195,28 @@ class MainActivity : ComponentActivity() {
                                 .putExtra(BluetoothAdapter.EXTRA_DISCOVERABLE_DURATION, 120),
                         )
                     },
-                    onRetryBluetooth = { startBluetooth() },
+                    onRetryBluetooth = { startBluetooth(restart = true) },
                     onOpenPad = { showPad = true },
                 )
             }
         }
     }
 
-    /** Bluetooth carries the input to the games when connected; Wi-Fi always gets it (menus, fallback). */
-    private fun send(state: PadState) {
-        val viaBluetooth = hid.send(state)
-        link.sendPad(state, viaBluetooth)
-    }
+    private fun send(state: PadState) = Controller.send(state)
 
-    private fun startBluetooth() {
-        hid.stop()
+    /** Registers the Bluetooth controller once (not again on every return to the app). */
+    private fun startBluetooth(restart: Boolean = false) {
+        // AetherPlay feeds the games through a virtual controller: no Bluetooth one.
+        if (link.useBluetooth.value == false && !restart) return
+        if (restart) hid.stop()
         val missing = btPermissions.filter { ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED }
         if (missing.isEmpty()) hid.start() else askPermissions.launch(missing.toTypedArray())
     }
 
     override fun onStart() {
         super.onStart()
-        discovery.start()
+        // Keeps Bluetooth and Wi-Fi connected when the app is left (notification).
+        ControllerService.start(this)
         startBluetooth()
-    }
-
-    override fun onStop() {
-        super.onStop()
-        discovery.stop()
-        hid.stop()
-        link.disconnect()
     }
 }

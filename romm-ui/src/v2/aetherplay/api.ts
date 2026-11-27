@@ -57,6 +57,8 @@ export interface PhoneStatus {
   /** Wi-Fi input can reach the games (virtual controller available). */
   virtual: boolean;
   os: "windows" | "macos" | "linux";
+  /** This computer's IPv4 addresses, to type on the phone if needed. */
+  addresses: string[];
 }
 
 export const app = {

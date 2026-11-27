@@ -40,6 +40,13 @@ class Link {
     /** False when AetherPlay cannot create a virtual controller (macOS, or no driver on Windows). */
     private val _wifiInput = MutableStateFlow(true)
     val wifiInput: StateFlow<Boolean> = _wifiInput
+    /**
+     * Whether the games should get this phone through its Bluetooth controller
+     * (true) or through the virtual controller AetherPlay creates (false: the
+     * Bluetooth one would be a second, idle player). Null until told.
+     */
+    private val _useBluetooth = MutableStateFlow<Boolean?>(null)
+    val useBluetooth: StateFlow<Boolean?> = _useBluetooth
     /** Second screen streamed by AetherPlay (DS bottom screen, Wii U GamePad): its size, or null. */
     private val _screen = MutableStateFlow<Pair<Int, Int>?>(null)
     val screen: StateFlow<Pair<Int, Int>?> = _screen
@@ -114,6 +121,7 @@ class Link {
             "idle" -> _game.value = null
             "virtual" -> _wifiInput.value = msg.optBoolean("ok", false)
             "player" -> _player.value = msg.optInt("n", 0)
+            "route" -> _useBluetooth.value = msg.optBoolean("bluetooth", true)
             "screen" -> if (msg.optBoolean("on")) {
                 _screen.value = msg.optInt("w", 256) to msg.optInt("h", 192)
             } else {

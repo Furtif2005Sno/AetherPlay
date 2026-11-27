@@ -92,6 +92,8 @@ pub fn status() -> Value {
         "phones": SHARED.phones.lock().expect("phones").clone(),
         // Can Wi-Fi input reach the games (virtual controller)?
         "virtual": virtual_pad::available(),
+        // To type on the phone when it cannot find AetherPlay by itself.
+        "addresses": addresses(),
         "os": crate::emulators::CURRENT_OS,
     })
 }
@@ -228,12 +230,14 @@ async fn serve(app: &AppHandle, stream: TcpStream) -> Result<(), String> {
     if let Some(screen) = screen_state {
         tx.send(Message::text(screen)).await.map_err(|e| e.to_string())?;
     }
-    let mut virtual_pad = virtual_pad::VirtualPad::new();
-    tx.send(send(json!({ "t": "virtual", "ok": virtual_pad.is_ok() }))).await.map_err(|e| e.to_string())?;
-    if let Err(e) = &virtual_pad {
-        shell::log(app, &format!("manette Android : pas de manette virtuelle ({e}), Bluetooth nécessaire pour les jeux"));
+    // One game controller per phone: a virtual one when this computer can
+    // create it (players then get ports in order), else the phone's Bluetooth.
+    let virtual_ok = pads_add(me.id, me.player);
+    tx.send(send(json!({ "t": "virtual", "ok": virtual_ok }))).await.map_err(|e| e.to_string())?;
+    tx.send(send(json!({ "t": "route", "bluetooth": !virtual_ok }))).await.map_err(|e| e.to_string())?;
+    if !virtual_ok {
+        shell::log(app, "manette Android : pas de manette virtuelle, Bluetooth nécessaire pour les jeux");
     }
-
     let mut last_try = std::time::Instant::now();
     let result: Result<(), String> = async {
         loop {
@@ -249,23 +253,20 @@ async fn serve(app: &AppHandle, stream: TcpStream) -> Result<(), String> {
                             for (i, a) in msg["a"].as_array().into_iter().flatten().take(4).enumerate() {
                                 axes[i] = a.as_f64().unwrap_or(0.0).clamp(-1.0, 1.0) as f32;
                             }
-                            // Bluetooth already feeds the games: no second controller.
                             let bluetooth = msg["bt"].as_bool().unwrap_or(false);
-                            // On Windows the interface sees Bluetooth and virtual pads
-                            // by itself; otherwise AetherPlay hands it the phone state.
-                            let ui = !cfg!(windows) || (!bluetooth && virtual_pad.is_err());
-                            gamepad::set_remote(me.id, Some((buttons, axes)), ui);
-                            // Driver installed meanwhile (Windows): pick it up.
-                            if virtual_pad.is_err() && !bluetooth && last_try.elapsed() > std::time::Duration::from_secs(5) {
+                            // Driver installed meanwhile (Windows): switch the phone to it.
+                            if !pads_has(me.id) && last_try.elapsed() > std::time::Duration::from_secs(5) {
                                 last_try = std::time::Instant::now();
-                                virtual_pad = virtual_pad::VirtualPad::new();
-                                if virtual_pad.is_ok() {
+                                if pads_add(me.id, me.player) {
                                     tx.send(send(json!({ "t": "virtual", "ok": true }))).await.map_err(|e| e.to_string())?;
+                                    tx.send(send(json!({ "t": "route", "bluetooth": false }))).await.map_err(|e| e.to_string())?;
                                 }
                             }
-                            if let Ok(pad) = &mut virtual_pad {
-                                pad.update(if bluetooth { 0 } else { buttons }, if bluetooth { [0.0; 4] } else { axes });
-                            }
+                            let has_pad = pads_update(me.id, buttons, axes);
+                            // On Windows the interface sees Bluetooth and virtual pads
+                            // by itself; otherwise AetherPlay hands it the phone state.
+                            let ui = !cfg!(windows) || (!bluetooth && !has_pad);
+                            gamepad::set_remote(me.id, Some((buttons, axes)), ui);
                         }
                         Some("quit") => gamepad::quit_game(),
                         Some("touch") => crate::dualscreen::touch(
@@ -293,9 +294,75 @@ async fn serve(app: &AppHandle, stream: TcpStream) -> Result<(), String> {
     .await;
 
     gamepad::set_remote(me.id, None, false);
+    pads_remove(me.id);
     leave(me.id);
     shell::log(app, &format!("manette Android déconnectée : {name}"));
     result
+}
+
+/// Virtual controllers by phone connection, with their player number.
+static PADS: Mutex<Vec<(u64, u8, Option<virtual_pad::VirtualPad>)>> = Mutex::new(Vec::new());
+
+/// Gives phone `id` a virtual controller; false if this computer cannot.
+fn pads_add(id: u64, player: u8) -> bool {
+    let pad = virtual_pad::VirtualPad::new().ok();
+    let ok = pad.is_some();
+    let mut pads = PADS.lock().expect("pads");
+    pads.retain(|p| p.0 != id);
+    pads.push((id, player, pad));
+    ok
+}
+
+fn pads_has(id: u64) -> bool {
+    PADS.lock().expect("pads").iter().any(|p| p.0 == id && p.2.is_some())
+}
+
+/// Feeds phone `id`'s virtual controller; false if it has none.
+fn pads_update(id: u64, buttons: u32, axes: [f32; 4]) -> bool {
+    let mut pads = PADS.lock().expect("pads");
+    match pads.iter_mut().find(|p| p.0 == id).and_then(|p| p.2.as_mut()) {
+        Some(pad) => {
+            pad.update(buttons, axes);
+            true
+        }
+        None => false,
+    }
+}
+
+fn pads_remove(id: u64) {
+    PADS.lock().expect("pads").retain(|p| p.0 != id);
+}
+
+/// RetroTogether: before a game starts, recreate the virtual controllers in
+/// player order, so the emulator numbers them J1, J2… (it assigns ports in
+/// the order controllers appeared).
+pub fn order_players() {
+    let mut pads = PADS.lock().expect("pads");
+    if pads.iter().filter(|p| p.2.is_some()).count() < 2 {
+        return;
+    }
+    pads.sort_by_key(|p| p.1);
+    for p in pads.iter_mut() {
+        p.2 = None;
+    }
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    for p in pads.iter_mut() {
+        p.2 = virtual_pad::VirtualPad::new().ok();
+    }
+    std::thread::sleep(std::time::Duration::from_millis(300));
+}
+
+/// This computer's IPv4 addresses (Wi-Fi, Ethernet, USB tethering…).
+fn addresses() -> Vec<String> {
+    if_addrs::get_if_addrs()
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|i| !i.is_loopback())
+        .filter_map(|i| match i.ip() {
+            std::net::IpAddr::V4(ip) if !ip.is_link_local() => Some(ip.to_string()),
+            _ => None,
+        })
+        .collect()
 }
 
 fn host_name() -> String {

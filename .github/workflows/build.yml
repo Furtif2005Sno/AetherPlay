@@ -1,7 +1,8 @@
 name: Build
 
 # Push to main: installers as workflow artifacts.
-# Tag v*: same, then a published GitHub release holding only the .msi, .dmg, .AppImage and .apk.
+# Tag v*: same, then a published GitHub release with the .msi, .dmg, .AppImage
+# and .apk, plus latest.json and the Mac update package for automatic updates.
 on:
   push:
     branches: [main]
@@ -23,14 +24,18 @@ jobs:
             name: windows-x64
             bundles: msi
             installer: src-tauri/target/release/bundle/msi/*.msi
+            # Signature of the installer, for AetherPlay's automatic updates.
+            updater: src-tauri/target/release/bundle/msi/*.msi.sig
           - os: macos-latest # Apple Silicon (arm64)
             name: macos-arm64
             bundles: app
             installer: AetherPlay.dmg
+            updater: AetherPlay.app.tar.gz*
           - os: ubuntu-22.04 # SteamOS / Linux x86_64 (old glibc = runs everywhere)
             name: linux-x64
             bundles: appimage
             installer: src-tauri/target/release/bundle/appimage/*.AppImage
+            updater: src-tauri/target/release/bundle/appimage/*.AppImage.sig
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v5
@@ -68,7 +73,19 @@ jobs:
 
       - run: cargo test --manifest-path src-tauri/Cargo.toml
 
-      - run: npm run tauri build -- --bundles ${{ matrix.bundles }}
+      # With the updater key (repository secrets), also sign the installers
+      # for AetherPlay's automatic updates.
+      - name: Build installer
+        shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          if [ -n "$TAURI_SIGNING_PRIVATE_KEY" ]; then
+            npm run tauri build -- --bundles ${{ matrix.bundles }} --config '{"bundle":{"createUpdaterArtifacts":true}}'
+          else
+            npm run tauri build -- --bundles ${{ matrix.bundles }}
+          fi
 
       # Gatekeeper reports an app without a bundle signature as "damaged", with
       # no way to open it. Ad-hoc sign the whole bundle (free, no Apple account),
@@ -85,11 +102,25 @@ jobs:
           ln -s /Applications dmg-stage/Applications
           hdiutil create -volname AetherPlay -srcfolder dmg-stage -ov -format UDZO AetherPlay.dmg
 
+      # Update package built from the signed app (the one Tauri makes comes
+      # before codesign), then signed with the updater key.
+      - if: runner.os == 'macOS'
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          if [ -n "$TAURI_SIGNING_PRIVATE_KEY" ]; then
+            tar -czf AetherPlay.app.tar.gz -C src-tauri/target/release/bundle/macos AetherPlay.app
+            npx tauri signer sign AetherPlay.app.tar.gz
+          fi
+
       - uses: actions/upload-artifact@v4
         with:
           name: aetherplay-${{ matrix.name }}
           if-no-files-found: error
-          path: ${{ matrix.installer }}
+          path: |
+            ${{ matrix.installer }}
+            ${{ matrix.updater }}
 
   android:
     runs-on: ubuntu-latest
@@ -150,12 +181,32 @@ jobs:
         # Fixed names keep the .../releases/latest/download/<name> links stable
         # across versions, so a direct download link never has to change.
         run: |
+          # latest.json: what AetherPlay checks for automatic updates.
+          BASE="https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG"
+          EXTRA=""
+          if ls installers/*.msi.sig installers/*.AppImage.sig installers/AetherPlay.app.tar.gz.sig >/dev/null 2>&1; then
+            jq -n \
+              --arg version "${TAG#v}" \
+              --arg date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+              --arg win "$(cat installers/*.msi.sig)" \
+              --arg mac "$(cat installers/AetherPlay.app.tar.gz.sig)" \
+              --arg linux "$(cat installers/*.AppImage.sig)" \
+              --arg base "$BASE" \
+              '{version: $version, pub_date: $date, notes: "AetherPlay \($version)", platforms: {
+                 "windows-x86_64": {signature: $win, url: "\($base)/AetherPlay-Windows.msi"},
+                 "darwin-aarch64": {signature: $mac, url: "\($base)/AetherPlay-Mac.app.tar.gz"},
+                 "linux-x86_64": {signature: $linux, url: "\($base)/AetherPlay-SteamOS.AppImage"}}}' \
+              > installers/latest.json
+            mv installers/AetherPlay.app.tar.gz installers/AetherPlay-Mac.app.tar.gz
+            EXTRA="installers/latest.json installers/AetherPlay-Mac.app.tar.gz"
+          fi
+          rm -f installers/*.sig
           mv installers/*.msi installers/AetherPlay-Windows.msi
           mv installers/*.dmg installers/AetherPlay-Mac.dmg
           mv installers/*.AppImage installers/AetherPlay-SteamOS.AppImage
           mv installers/*.apk installers/AetherPlay-Android.apk
           gh release delete "$TAG" --repo "$GITHUB_REPOSITORY" --yes || true
-          gh release create "$TAG" installers/AetherPlay-Windows.msi installers/AetherPlay-Mac.dmg installers/AetherPlay-SteamOS.AppImage installers/AetherPlay-Android.apk \
+          gh release create "$TAG" installers/AetherPlay-Windows.msi installers/AetherPlay-Mac.dmg installers/AetherPlay-SteamOS.AppImage installers/AetherPlay-Android.apk $EXTRA \
             --repo "$GITHUB_REPOSITORY" \
             --verify-tag \
             --title "AetherPlay $TAG" \

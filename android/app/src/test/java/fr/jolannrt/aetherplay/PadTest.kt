@@ -10,6 +10,14 @@ import org.junit.Test
 
 class PadTest {
     @Test
+    fun releaseVersionsCompareNumerically() {
+        assertTrue(AppUpdate.newer("0.3.10", "0.3.9"))
+        assertTrue(AppUpdate.newer("0.4.0", "0.3.2"))
+        assertTrue(!AppUpdate.newer("0.3.2", "0.3.2"))
+        assertTrue(!AppUpdate.newer("0.3.1", "0.3.2"))
+    }
+
+    @Test
     fun hidReportPacksButtonsThenAxes() {
         val state = PadState((1 shl Btn.SOUTH) or (1 shl Btn.START) or (1 shl Btn.HOME), listOf(1f, -1f, 0f, 0.5f))
         val r = state.hidReport()

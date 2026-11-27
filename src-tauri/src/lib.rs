@@ -12,6 +12,7 @@ mod romm;
 mod roms;
 mod saves;
 mod shell;
+mod updater;
 
 use serde::Serialize;
 use serde_json::{json, Value};
@@ -259,6 +260,9 @@ async fn launch(app: AppHandle, rom_id: u64, fullscreen: bool) -> Result<LaunchR
         emulators::register_external_content(&ini, &dest)
             .map_err(|e| fail("launch-failed", format!("Configuration des mises à jour/DLC : {e}")))?;
     }
+    // RetroTogether: virtual controllers recreated in player order (J1 = port 1).
+    let _ = tauri::async_runtime::spawn_blocking(phone::order_players).await;
+
     // Controllers as SDL sees them: Android controllers over Bluetooth get an
     // SDL mapping (passed to the emulator), and Eden/Eglantine, which start
     // keyboard-only, get player 1 pointed at the connected pad.
@@ -583,6 +587,8 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         // `romm://` serves the bundled RomM interface and relays its API calls.
         .register_asynchronous_uri_scheme_protocol("romm", |ctx, req, responder| {
             let app = ctx.app_handle().clone();
@@ -592,6 +598,7 @@ pub fn run() {
             shell::create_main_window(app.handle())?;
             gamepad::spawn_watcher(app.handle().clone());
             phone::start(app.handle().clone());
+            updater::spawn(app.handle().clone());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

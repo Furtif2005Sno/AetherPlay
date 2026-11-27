@@ -214,6 +214,11 @@ onUnmounted(() => {
             Dans l'app AetherPlay sur Android (même Wi-Fi), choisis cet ordinateur puis tape ce code, une seule fois.
             Chaque téléphone connecté est un joueur : plusieurs téléphones = partie à plusieurs.
           </div>
+          <div class="aep-muted">
+            Adresse de cet ordinateur : <span class="aep-pin">{{ phone.addresses.join(" · ") || "aucune" }}</span>.
+            Réseau d'école ou public (appareils isolés) : active le partage de connexion USB du téléphone, ou connecte
+            l'ordinateur au point d'accès du téléphone, puis tape cette adresse dans l'app si besoin.
+          </div>
         </div>
       </div>
       <div class="aep-row">

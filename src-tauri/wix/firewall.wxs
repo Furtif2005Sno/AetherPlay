@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Firewall rules for the Android controller, on every network profile:
+  Windows files USB tethering and phone hotspots as "public" networks, where
+  the rule it asks about on first launch does not apply.
+  - TCP 47820: AetherPlay's link with the phone (phone.rs);
+  - UDP 5353: mDNS, so the phone finds AetherPlay by itself.
+  Added at install (after removing any older copy), removed at uninstall.
+-->
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <Fragment>
+    <DirectoryRef Id="INSTALLDIR">
+      <Component Id="AetherPlayFirewall" Guid="*">
+        <RegistryValue Root="HKLM" Key="Software\AetherPlay" Name="FirewallRules" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+    </DirectoryRef>
+
+    <CustomAction Id="AetherPlayFirewallClean" Directory="INSTALLDIR" Execute="deferred" Impersonate="no" Return="ignore"
+      ExeCommand="&quot;[System64Folder]netsh.exe&quot; advfirewall firewall delete rule name=&quot;AetherPlay manette&quot;" />
+    <CustomAction Id="AetherPlayFirewallCleanMdns" Directory="INSTALLDIR" Execute="deferred" Impersonate="no" Return="ignore"
+      ExeCommand="&quot;[System64Folder]netsh.exe&quot; advfirewall firewall delete rule name=&quot;AetherPlay decouverte&quot;" />
+    <CustomAction Id="AetherPlayFirewallAdd" Directory="INSTALLDIR" Execute="deferred" Impersonate="no" Return="ignore"
+      ExeCommand="&quot;[System64Folder]netsh.exe&quot; advfirewall firewall add rule name=&quot;AetherPlay manette&quot; dir=in action=allow protocol=TCP localport=47820 profile=any" />
+    <CustomAction Id="AetherPlayFirewallAddMdns" Directory="INSTALLDIR" Execute="deferred" Impersonate="no" Return="ignore"
+      ExeCommand="&quot;[System64Folder]netsh.exe&quot; advfirewall firewall add rule name=&quot;AetherPlay decouverte&quot; dir=in action=allow protocol=UDP localport=5353 profile=any" />
+
+    <InstallExecuteSequence>
+      <Custom Action="AetherPlayFirewallClean" Before="InstallFinalize" />
+      <Custom Action="AetherPlayFirewallCleanMdns" After="AetherPlayFirewallClean" />
+      <Custom Action="AetherPlayFirewallAdd" After="AetherPlayFirewallCleanMdns">NOT (REMOVE="ALL")</Custom>
+      <Custom Action="AetherPlayFirewallAddMdns" After="AetherPlayFirewallAdd">NOT (REMOVE="ALL")</Custom>
+    </InstallExecuteSequence>
+  </Fragment>
+</Wix>
