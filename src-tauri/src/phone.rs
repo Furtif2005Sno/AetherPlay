@@ -107,6 +107,35 @@ fn publish(msg: String) {
     let _ = SHARED.events.send(msg);
 }
 
+/// Messages for phones linked another way (Bluetooth serial, bt_link.rs):
+/// the current "game" / "idle" message and the later ones.
+pub fn current_message() -> String {
+    SHARED.current.lock().expect("current").clone()
+}
+
+pub fn subscribe() -> broadcast::Receiver<String> {
+    SHARED.events.subscribe()
+}
+
+/// A phone linked over Bluetooth takes a player number like a Wi-Fi one.
+pub fn bluetooth_join(name: &str) -> (u64, u8) {
+    let p = join(&format!("{name} (Bluetooth)"));
+    (p.id, p.player)
+}
+
+pub fn bluetooth_leave(id: u64) {
+    leave(id);
+}
+
+/// RetroTogether over Bluetooth: player number from the emulator's order.
+pub fn set_player(id: u64, player: u8) {
+    let mut phones = SHARED.phones.lock().expect("phones");
+    if let Some(p) = phones.iter_mut().find(|p| p.id == id) {
+        p.player = player;
+    }
+    phones.sort_by_key(|p| p.player);
+}
+
 /// A game started: phones switch to its console's controller.
 pub fn game_started(rom: &Rom, cover: Option<Vec<u8>>) {
     crate::bt_phone::game(&rom.platform_slug, rom.name.as_deref().unwrap_or(&rom.fs_name));

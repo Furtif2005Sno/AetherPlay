@@ -16,6 +16,9 @@ object Controller {
         private set
     lateinit var hid: HidGamepad
         private set
+    /** Game info over Bluetooth, beside the controller (no Wi-Fi needed). */
+    lateinit var btLink: fr.jolannrt.aetherplay.bt.BtLink
+        private set
     val link = Link()
     private var ready = false
 
@@ -24,6 +27,7 @@ object Controller {
         val app = context.applicationContext
         discovery = Discovery(app)
         hid = HidGamepad(app)
+        btLink = fr.jolannrt.aetherplay.bt.BtLink(app)
         ready = true
     }
 
@@ -37,6 +41,7 @@ object Controller {
         if (!ready) return
         discovery.stop()
         hid.stop()
+        btLink.stop()
         link.disconnect()
     }
 }

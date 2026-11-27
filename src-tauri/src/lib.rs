@@ -1,3 +1,4 @@
+mod bt_link;
 mod bt_phone;
 mod cache;
 mod config;
@@ -278,6 +279,9 @@ async fn launch(app: AppHandle, rom_id: u64, fullscreen: bool) -> Result<LaunchR
                 let found = controller::detect(&lib)?;
                 // Bluetooth phones get player numbers in the emulator's order.
                 bt_phone::order(found.pads.iter().map(|p| p.path.clone()).collect());
+                bt_link::order(
+                    found.pads.iter().enumerate().filter(|(_, p)| p.name == "AetherPlay Manette").map(|(i, _)| i).collect(),
+                );
                 // RetroTogether: each controller becomes a player in the emulator.
                 let players = match (emu_id.as_str(), &ini, &save_dir) {
                     (_, Some(ini), _) => controller::apply(ini, &found.pads)?,
@@ -688,6 +692,7 @@ pub fn run() {
             phone::start(app.handle().clone());
             updater::spawn(app.handle().clone());
             bt_phone::spawn(app.handle().clone());
+            bt_link::spawn(app.handle().clone());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

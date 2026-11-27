@@ -23,6 +23,14 @@ Le téléphone répond aux demandes de rapport du PC : l'état de la manette pou
 
 Les navigateurs, donc l'interface RomM, lisent ce rapport tel quel. Pour les émulateurs, AetherPlay ajoute la configuration SDL correspondante (`SDL_GAMECONTROLLERCONFIG`) et un profil RetroArch. Il reconnaît la manette à son nom ou, à défaut, à sa forme (17 boutons, 4 axes, pas de chapeau).
 
+## Canal série Bluetooth (Windows)
+
+À côté de la manette, qui reste la manette simple, l'app ouvre un service Bluetooth série (RFCOMM, UUID `6e3a5c1e-7f2b-4c1a-9d6e-ae7e4b1a0001`, nom « AetherPlay »). Toutes les 5 secondes, AetherPlay essaie ce service sur les appareils Bluetooth connectés au PC ; seul le téléphone l'a. Une fois relié :
+- **Du PC vers le téléphone :** les mêmes messages JSON qu'en Wi-Fi, un par ligne : `game` (avec la jaquette), `idle`, `player`.
+- **Du téléphone vers le PC :** `hello`, puis `quit` (bouton « Quitter le jeu »).
+
+Ça marche sans Wi-Fi. Si ce canal échoue, la manette continue de marcher, il manque seulement les infos de jeu. Avant chaque partie, le numéro de joueur suit la position de la manette Android dans l'ordre de l'émulateur.
+
 ## Wi-Fi : appairage, jeu en cours, menus
 
 - **Découverte :** mDNS `_aetherplay._tcp`, port 47820.

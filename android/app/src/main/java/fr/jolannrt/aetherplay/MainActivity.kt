@@ -53,6 +53,7 @@ class MainActivity : ComponentActivity() {
 
     private val askPermissions = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
         hid.start()
+        Controller.btLink.start()
     }
 
     private val askVisible = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {}
@@ -99,13 +100,21 @@ class MainActivity : ComponentActivity() {
             val btEvents by hid.events.collectAsState()
             var btExtended by remember { mutableStateOf(hid.extended) }
             val wifiUp = linkStatusNow is Link.Status.Connected
-            val btGame = btInfo?.platform?.let { fr.jolannrt.aetherplay.net.Game(it, btInfo?.name ?: it, null) }
+            // Bluetooth serial channel (with cover), else the experimental HID channel.
+            val btLinkUp by Controller.btLink.connected.collectAsState()
+            val btLinkGame by Controller.btLink.game.collectAsState()
+            val btLinkPlayer by Controller.btLink.player.collectAsState()
+            val btGame = if (btLinkUp) btLinkGame else btInfo?.platform?.let { fr.jolannrt.aetherplay.net.Game(it, btInfo?.name ?: it, null) }
             val game = preview?.let { fr.jolannrt.aetherplay.net.Game(it, "Aperçu : $it", null) }
                 ?: if (wifiUp) linkGame else btGame
             val token by link.token.collectAsState()
             val btStatus by hid.status.collectAsState()
             val linkPlayer by link.player.collectAsState()
-            val player = if (wifiUp) linkPlayer else btInfo?.player ?: 0
+            val player = when {
+                wifiUp -> linkPlayer
+                btLinkUp -> btLinkPlayer
+                else -> btInfo?.player ?: 0
+            }
             val wifiInput by link.wifiInput.collectAsState()
             val linkScreen by link.screen.collectAsState()
             val linkFrame by link.frame.collectAsState()
@@ -188,7 +197,7 @@ class MainActivity : ComponentActivity() {
                     bluetooth = btConnected,
                     wifi = linkStatus is Link.Status.Connected,
                     onState = { state -> send(state) },
-                    onQuitGame = { link.quitGame() },
+                    onQuitGame = { if (wifiUp) link.quitGame() else Controller.btLink.quitGame() },
                     onSettings = { showPad = false },
                 )
             } else {
@@ -222,7 +231,12 @@ class MainActivity : ComponentActivity() {
         if (link.useBluetooth.value == false && !restart) return
         if (restart) hid.stop()
         val missing = btPermissions.filter { ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED }
-        if (missing.isEmpty()) hid.start() else askPermissions.launch(missing.toTypedArray())
+        if (missing.isEmpty()) {
+            hid.start()
+            Controller.btLink.start()
+        } else {
+            askPermissions.launch(missing.toTypedArray())
+        }
     }
 
     override fun onStart() {
