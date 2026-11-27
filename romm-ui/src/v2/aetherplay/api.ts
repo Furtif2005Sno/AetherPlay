@@ -61,6 +61,8 @@ export interface PhoneStatus {
   addresses: string[];
   /** Controllers AetherPlay reads itself (gilrs). */
   pads: string[];
+  /** Player numbers of the Android controllers linked by Bluetooth only. */
+  bluetooth: number[];
 }
 
 export const app = {

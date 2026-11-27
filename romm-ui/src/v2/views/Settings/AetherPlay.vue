@@ -282,7 +282,12 @@ onUnmounted(() => {
           <div class="aep-row__title"><span class="aep-tag">J{{ p.player }}</span> {{ p.name }}</div>
         </div>
       </div>
-      <p v-if="!phone.phones.length" class="aep-muted aep-pad">Aucun téléphone connecté.</p>
+      <div v-for="n in phone.bluetooth" :key="'bt' + n" class="aep-row">
+        <div class="aep-row__info">
+          <div class="aep-row__title"><span class="aep-tag">J{{ n }}</span> Téléphone en Bluetooth</div>
+        </div>
+      </div>
+      <p v-if="!phone.phones.length && !phone.bluetooth.length" class="aep-muted aep-pad">Aucun téléphone connecté.</p>
     </SettingsSection>
 
     <SettingsSection title="Émulateurs" icon="mdi-gamepad-variant-outline">

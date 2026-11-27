@@ -15,6 +15,10 @@ Rapport HID n° 1, 7 octets :
   - 16 : Home.
 - 4 axes signés (-127..127) : X et Y du stick gauche, Rx et Ry du stick droit. Y est positif vers le bas.
 
+En plus, deux rapports pour AetherPlay (page « vendor » 0xFF00), qui donnent en Bluetooth seul les mêmes fonctions qu'en Wi-Fi :
+- **Rapport de fonctionnalité n° 3** (16 octets) : la signature `AETHERPLAY-PAD01`. AetherPlay la lit pour reconnaître le téléphone parmi les manettes.
+- **Rapport de sortie n° 2** (63 octets, du PC vers le téléphone) : version (1), numéro de joueur, console (24 octets ASCII), nom du jeu (UTF-8). Le téléphone prend la disposition de la console et affiche J1, J2… Le numéro suit l'ordre dans lequel l'émulateur voit les manettes.
+
 Les navigateurs, donc l'interface RomM, lisent ce rapport tel quel. Pour les émulateurs, AetherPlay ajoute la configuration SDL correspondante (`SDL_GAMECONTROLLERCONFIG`) et un profil RetroArch. Il reconnaît la manette à son nom ou, à défaut, à sa forme (17 boutons, 4 axes, pas de chapeau).
 
 ## Wi-Fi : appairage, jeu en cours, menus

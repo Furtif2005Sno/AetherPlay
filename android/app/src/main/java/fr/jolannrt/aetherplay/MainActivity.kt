@@ -93,10 +93,17 @@ class MainActivity : ComponentActivity() {
             val servers by discovery.servers.collectAsState()
             val linkStatus by link.status.collectAsState()
             val linkGame by link.game.collectAsState()
-            val game = preview?.let { fr.jolannrt.aetherplay.net.Game(it, "Aperçu : $it", null) } ?: linkGame
+            val linkStatusNow by link.status.collectAsState()
+            // Bluetooth only (no Wi-Fi link): AetherPlay sends game and player over Bluetooth.
+            val btInfo by hid.info.collectAsState()
+            val wifiUp = linkStatusNow is Link.Status.Connected
+            val btGame = btInfo?.platform?.let { fr.jolannrt.aetherplay.net.Game(it, btInfo?.name ?: it, null) }
+            val game = preview?.let { fr.jolannrt.aetherplay.net.Game(it, "Aperçu : $it", null) }
+                ?: if (wifiUp) linkGame else btGame
             val token by link.token.collectAsState()
             val btStatus by hid.status.collectAsState()
-            val player by link.player.collectAsState()
+            val linkPlayer by link.player.collectAsState()
+            val player = if (wifiUp) linkPlayer else btInfo?.player ?: 0
             val wifiInput by link.wifiInput.collectAsState()
             val linkScreen by link.screen.collectAsState()
             val linkFrame by link.frame.collectAsState()

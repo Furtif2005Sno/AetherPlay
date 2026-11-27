@@ -96,6 +96,8 @@ pub fn status() -> Value {
         "addresses": addresses(),
         // Controllers AetherPlay sees (gilrs), Bluetooth phones included on macOS / Linux.
         "pads": gamepad::connected_pads(),
+        // Player numbers of the Android controllers linked by Bluetooth only.
+        "bluetooth": crate::bt_phone::players(),
         "os": crate::emulators::CURRENT_OS,
     })
 }
@@ -107,6 +109,7 @@ fn publish(msg: String) {
 
 /// A game started: phones switch to its console's controller.
 pub fn game_started(rom: &Rom, cover: Option<Vec<u8>>) {
+    crate::bt_phone::game(&rom.platform_slug, rom.name.as_deref().unwrap_or(&rom.fs_name));
     let cover = cover.map(|c| base64::engine::general_purpose::STANDARD.encode(c));
     publish(
         json!({
@@ -142,6 +145,7 @@ pub fn any_connected() -> bool {
 
 /// Back to the menus.
 pub fn game_ended() {
+    crate::bt_phone::idle();
     publish(json!({ "t": "idle" }).to_string());
 }
 

@@ -88,6 +88,8 @@ const BUTTONS: [(&str, Source); 22] = [
 /// A connected controller as the emulator will see it.
 pub struct Pad {
     pub name: String,
+    /// Device path (HID path on Windows), to match Bluetooth phones.
+    pub path: String,
     guid: String,
     port: usize,
     bindings: Vec<Binding>,
@@ -98,7 +100,7 @@ pub struct Pad {
 impl Pad {
     /// A pad with no bindings, for tests of other modules.
     pub fn test(name: &str) -> Self {
-        Pad { name: name.into(), guid: "00".into(), port: 0, bindings: Vec::new(), gyro: false }
+        Pad { name: name.into(), path: String::new(), guid: "00".into(), port: 0, bindings: Vec::new(), gyro: false }
     }
 }
 
@@ -187,6 +189,7 @@ pub fn detect(lib: &Path) -> Result<Detected, String> {
         let count_hats = sym!(b"SDL_GetNumJoystickHats\0", unsafe extern "C" fn(*mut c_void) -> c_int);
         let vendor_of = sym!(b"SDL_GetJoystickVendorForID\0", unsafe extern "C" fn(u32) -> u16);
         let product_of = sym!(b"SDL_GetJoystickProductForID\0", unsafe extern "C" fn(u32) -> u16);
+        let path_of = sym!(b"SDL_GetJoystickPathForID\0", unsafe extern "C" fn(u32) -> *const c_char);
 
         for (k, v) in [
             ("SDL_APP_NAME", "Eden"),
@@ -287,7 +290,11 @@ pub fn detect(lib: &Path) -> Result<Detected, String> {
             let gyro = has_sensor(gp, SENSOR_GYRO);
             close(gp);
             let port = pads.iter().filter(|p| p.guid == guid).count();
-            pads.push(Pad { name, guid, port, bindings, gyro });
+            let path = {
+                let p = path_of(id);
+                if p.is_null() { String::new() } else { CStr::from_ptr(p).to_string_lossy().into_owned() }
+            };
+            pads.push(Pad { name, path, guid, port, bindings, gyro });
         }
         quit();
         Ok(Detected { pads, phone_mappings, phones })
@@ -461,6 +468,7 @@ mod tests {
         let hat = |mask, o| Binding { input_type: BIND_HAT, input: [0, mask, 0], output_type: BIND_BUTTON, output: [o, 0, 0] };
         Pad {
             name: "Pro Controller".into(),
+            path: String::new(),
             guid: "0500000000000000000000000000ff00".into(),
             port: 0,
             bindings: vec![
