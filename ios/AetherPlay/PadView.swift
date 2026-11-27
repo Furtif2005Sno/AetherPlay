@@ -30,7 +30,7 @@ final class PadTouches: ObservableObject {
 
 // MARK: - Geometry (shared by drawing and touch)
 
-private func point(_ c: Control, _ size: CGSize) -> CGPoint {
+private func controlPoint(_ c: Control, _ size: CGSize) -> CGPoint {
     CGPoint(x: c.center.x * size.width, y: c.center.y * size.height)
 }
 
@@ -65,7 +65,7 @@ private func dpadBits(_ c: Control, _ p: CGPoint, _ size: CGSize) -> UInt32 {
 
 /// Nearest control under `p` (edit mode).
 func controlAt(_ layout: PadLayout, _ p: CGPoint, _ size: CGSize) -> Int? {
-    let scored = layout.controls.enumerated().map { i, c in (i, c, hypot(p.x - point(c, size).x, p.y - point(c, size).y)) }
+    let scored = layout.controls.enumerated().map { i, c in (i, c, hypot(p.x - controlPoint(c, size).x, p.y - controlPoint(c, size).y)) }
     guard let best = scored.min(by: { $0.2 < $1.2 }) else { return nil }
     return best.2 <= best.1.radius * size.height * 1.4 ? best.0 : nil
 }
@@ -108,7 +108,7 @@ final class TouchSurface: UIView {
                 continue
             }
             for c in layout.controls {
-                if case let .stick(axis, _, _, r, _) = c, hypot(p.x - point(c, size).x, p.y - point(c, size).y) <= r * size.height * 1.35 {
+                if case let .stick(axis, _, _, r, _) = c, hypot(p.x - controlPoint(c, size).x, p.y - controlPoint(c, size).y) <= r * size.height * 1.35 {
                     owners[ObjectIdentifier(t)] = axis
                     break
                 }
@@ -158,7 +158,7 @@ final class TouchSurface: UIView {
             if id == stylus { continue }
             let p = t.location(in: self)
             if let axis = owners[id], let c = layout.controls.first(where: { if case let .stick(a, _, _, _, _) = $0 { return a == axis }; return false }) {
-                let center = point(c, size)
+                let center = controlPoint(c, size)
                 let radius = c.radius * size.height
                 var d = CGPoint(x: (p.x - center.x) / radius, y: (p.y - center.y) / radius)
                 let len = hypot(d.x, d.y)
@@ -234,7 +234,7 @@ private func circle(_ c: CGPoint, _ r: CGFloat) -> Path { Path(ellipseIn: CGRect
 func drawControls(_ ctx: inout GraphicsContext, _ size: CGSize, _ layout: PadLayout, _ t: PadTouches, _ style: ButtonStyle) {
     let accent = Color(argb: layout.accent)
     for (i, c) in layout.controls.enumerated() {
-        let pc = point(c, size)
+        let pc = controlPoint(c, size)
         switch c {
         case let .button(id, text, _, _, r0, fill, textColor, pill, axis, _):
             let r = r0 * size.height
@@ -402,7 +402,7 @@ struct PadScreen: View {
                         let r = screenRect(area, img, size)
                         ctx.fill(Path(roundedRect: r.insetBy(dx: -4, dy: -4), cornerRadius: 7), with: .color(.black))
                         if let frame = model.link.frame {
-                            var c = ctx
+                            let c = ctx
                             c.draw(Image(uiImage: frame).interpolation(.none), in: r)
                         }
                     }
