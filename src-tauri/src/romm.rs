@@ -136,6 +136,11 @@ impl Client {
         self.send(req).await.map(|_| ())
     }
 
+    /// The server's users (may be refused to non-admins).
+    pub async fn users(&self) -> Result<Vec<serde_json::Value>, String> {
+        self.json(self.url(&["api", "users"])).await
+    }
+
     /// RomM's "now playing" of every user.
     pub async fn activity(&self) -> Result<Vec<serde_json::Value>, String> {
         self.json(self.url(&["api", "activity"])).await

@@ -13,8 +13,12 @@ android {
         // BluetoothHidDevice (the phone as a Bluetooth controller) needs Android 9.
         minSdk = 28
         targetSdk = 36
-        versionCode = 17
-        versionName = "0.5.4"
+        // Release builds take the release's number (CI: APP_VERSION from the
+        // tag, "0.6.1" -> code 601), so the app never offers its own version as
+        // an update; other builds keep these.
+        val release = System.getenv("APP_VERSION")?.removePrefix("v")?.takeIf { Regex("""\d+\.\d+\.\d+""").matches(it) }
+        versionCode = release?.split('.')?.map(String::toInt)?.let { (a, b, c) -> a * 10000 + b * 100 + c } ?: 17
+        versionName = release ?: "0.5.4"
     }
 
     signingConfigs {

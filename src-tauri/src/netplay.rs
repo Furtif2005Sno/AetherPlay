@@ -30,7 +30,8 @@ const LOBBY: &str = "http://lobby.libretro.com/list/";
 /// How the next launch runs.
 #[derive(Clone, Debug)]
 pub enum Mode {
-    Host,
+    /// `to`: usernames invited (empty: every user of the server).
+    Host { to: Vec<String> },
     Join(Session),
 }
 
@@ -46,6 +47,10 @@ pub struct Session {
     pub retroarch: String,
     #[serde(default)]
     pub core: String,
+    /// Usernames invited; empty: everyone. (The note stays readable by every
+    /// user of the server: this only decides who is offered to join.)
+    #[serde(default)]
+    pub to: Vec<String>,
 }
 
 static NEXT: Mutex<Option<Mode>> = Mutex::new(None);
@@ -81,7 +86,7 @@ pub fn arguments(mode: &Mode, dir: &Path) -> Result<(Vec<String>, Option<Room>),
     std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     let cfg = dir.join("netplay.cfg");
     match mode {
-        Mode::Host => {
+        Mode::Host { .. } => {
             let nick = format!("AetherPlay-{}", random_hex(6));
             let password = random_hex(10);
             let text = format!(
@@ -152,6 +157,7 @@ fn room_session(rooms: &[Value], nick: &str, password: &str) -> Option<Session> 
         core: format!("{} {}", f["core_name"].as_str().unwrap_or_default(), f["core_version"].as_str().unwrap_or_default())
             .trim()
             .to_string(),
+        to: Vec::new(),
     })
 }
 
@@ -167,7 +173,9 @@ pub struct Invite {
 
 /// Invitations of the other users currently playing.
 pub async fn invites(client: &Client) -> Result<Vec<Invite>, String> {
-    let me = client.me().await?["id"].as_u64().unwrap_or(0);
+    let me_info = client.me().await?;
+    let me = me_info["id"].as_u64().unwrap_or(0);
+    let my_name = me_info["username"].as_str().unwrap_or_default().to_lowercase();
     let mut out = Vec::new();
     for a in client.activity().await? {
         let Some(user) = a["user_id"].as_u64().filter(|u| *u != me) else { continue };
@@ -177,7 +185,7 @@ pub async fn invites(client: &Client) -> Result<Vec<Invite>, String> {
             .iter()
             .filter(|n| n["title"] == NOTE_TITLE && n["user_id"].as_u64() == Some(user))
             .filter_map(|n| serde_json::from_str::<Session>(n["content"].as_str()?).ok())
-            .next_back();
+            .rfind(|s| s.to.is_empty() || s.to.iter().any(|u| u.to_lowercase() == my_name));
         if let Some(session) = found {
             out.push(Invite {
                 rom_id,
@@ -246,7 +254,7 @@ mod tests {
     #[test]
     fn host_and_join_arguments() {
         let dir = std::env::temp_dir().join(format!("aep-netplay-{}", std::process::id()));
-        let (args, room) = arguments(&Mode::Host, &dir).unwrap();
+        let (args, room) = arguments(&Mode::Host { to: Vec::new() }, &dir).unwrap();
         let (nick, password) = room.unwrap();
         assert!(args.contains(&"-H".to_string()) && args.contains(&nick));
         let cfg = std::fs::read_to_string(dir.join("netplay.cfg")).unwrap();
@@ -258,6 +266,7 @@ mod tests {
             password: "pw".into(),
             retroarch: String::new(),
             core: String::new(),
+            to: Vec::new(),
         };
         let (args, room) = arguments(&Mode::Join(s), &dir).unwrap();
         assert!(room.is_none());

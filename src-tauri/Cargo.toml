@@ -1,6 +1,6 @@
 [package]
 name = "aetherplay"
-version = "0.6.0"
+version = "0.6.1"
 description = "Client desktop pour RomM"
 authors = ["Anthares74"]
 edition = "2024"

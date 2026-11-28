@@ -114,7 +114,8 @@ export const app = {
   imageCacheSize: () => invoke<number>("image_cache_size"),
   detectControllers: () => invoke<{ name: string; phone: boolean; idle: boolean }[]>("detect_controllers"),
   setPadOrder: (order: string[]) => invoke<void>("set_pad_order", { order }),
-  netplayHost: (romId: number) => invoke<unknown>("netplay_host", { romId }),
+  netplayHost: (romId: number, to: string[]) => invoke<unknown>("netplay_host", { romId, to }),
+  netplayUsers: () => invoke<string[]>("netplay_users"),
   netplayJoin: (romId: number, session: NetplaySession) => invoke<unknown>("netplay_join", { romId, session }),
   netplayInvites: () => invoke<NetplayInvite[]>("netplay_invites"),
   onNetplay: (handler: (s: { romId: number; status: string; message?: string }) => void) =>

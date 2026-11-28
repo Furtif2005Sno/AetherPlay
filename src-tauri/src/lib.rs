@@ -520,13 +520,20 @@ async fn launch(app: AppHandle, rom_id: u64, fullscreen: bool) -> Result<LaunchR
     }
     // Host: find the relay session, then invite through RomM.
     let hosting = room.is_some();
+    let invited = match &remote {
+        Some(netplay::Mode::Host { to }) => to.clone(),
+        _ => Vec::new(),
+    };
     if let Some((nick, password)) = room {
         let (app3, client3, rom3) = (app.clone(), client.clone(), rom.id);
         tauri::async_runtime::spawn(async move {
             let _ = app3.emit("netplay", json!({ "romId": rom3, "status": "searching" }));
             let ended = || !gamepad::is_running();
             let result = match netplay::find_room(&nick, &password, ended).await {
-                Ok(session) => netplay::publish(&client3, rom3, &session).await.map(|_| session),
+                Ok(mut session) => {
+                    session.to = invited;
+                    netplay::publish(&client3, rom3, &session).await.map(|_| session)
+                }
                 Err(e) => Err(e),
             };
             match result {
@@ -739,8 +746,8 @@ fn set_pad_order(app: AppHandle, order: Vec<String>) -> Result<(), String> {
 
 /// Remote play: launch `rom_id` as netplay host and invite through RomM.
 #[tauri::command]
-async fn netplay_host(app: AppHandle, rom_id: u64) -> Result<LaunchResult, LaunchError> {
-    netplay::prepare(netplay::Mode::Host);
+async fn netplay_host(app: AppHandle, rom_id: u64, to: Vec<String>) -> Result<LaunchResult, LaunchError> {
+    netplay::prepare(netplay::Mode::Host { to });
     launch(app, rom_id, false).await
 }
 
@@ -749,6 +756,23 @@ async fn netplay_host(app: AppHandle, rom_id: u64) -> Result<LaunchResult, Launc
 async fn netplay_join(app: AppHandle, rom_id: u64, session: netplay::Session) -> Result<LaunchResult, LaunchError> {
     netplay::prepare(netplay::Mode::Join(session));
     launch(app, rom_id, false).await
+}
+
+/// Other users of the server, to pick whom to invite (RomM may refuse the
+/// list to non-admins: the page then lets usernames be typed).
+#[tauri::command]
+async fn netplay_users(app: AppHandle) -> Result<Vec<String>, String> {
+    let client = client(&app)?;
+    let me = client.me().await?["username"].as_str().unwrap_or_default().to_string();
+    let mut names: Vec<String> = client
+        .users()
+        .await?
+        .iter()
+        .filter_map(|u| u["username"].as_str().map(str::to_owned))
+        .filter(|n| *n != me)
+        .collect();
+    names.sort_by_key(|n| n.to_lowercase());
+    Ok(names)
 }
 
 /// Remote plays other users of the server offer right now.
@@ -990,7 +1014,8 @@ pub fn run() {
             set_pad_order,
             netplay_host,
             netplay_join,
-            netplay_invites
+            netplay_invites,
+            netplay_users
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
