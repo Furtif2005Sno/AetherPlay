@@ -13,6 +13,7 @@ mod relay;
 mod players;
 mod romm;
 mod roms;
+mod netplay;
 mod saves;
 mod shell;
 mod switch_keys;
@@ -229,9 +230,11 @@ async fn launch(app: AppHandle, rom_id: u64, fullscreen: bool) -> Result<LaunchR
     // game starts or runs must not launch it again.
     if LAUNCHING.swap(true, std::sync::atomic::Ordering::SeqCst) {
         shell::log(&app, &format!("launch rom={rom_id}: ignoré, un jeu est déjà lancé"));
-        return Err(LaunchError { code: "launch-failed", message: "Un jeu est déjà lancé".into() });
+        return Err(LaunchError { code: "already-running", message: "Un jeu est déjà lancé".into() });
     }
     let mut lock = LaunchLock(true);
+    // Remote play asked for this launch (netplay_host / netplay_join).
+    let remote = netplay::take();
     let fail = |code: &'static str, message: String| {
         shell::log(&app, &format!("launch rom={rom_id}: échec {code} : {message}"));
         launch_state(&app, rom_id, json!({ "status": "failed", "error": { "code": code, "message": message } }));
@@ -242,6 +245,12 @@ async fn launch(app: AppHandle, rom_id: u64, fullscreen: bool) -> Result<LaunchR
     let cfg = config::load(&app);
     let (emu, exe) = emulators::resolve(&rom.platform_slug, &cfg.emulator_paths, &cfg.platform_emulators)
         .ok_or_else(|| fail("no-emulator-configured", format!("Aucun émulateur configuré pour « {} »", rom.platform_slug)))?;
+    if remote.is_some() && emu.cores.is_empty() {
+        return Err(fail(
+            "launch-failed",
+            format!("Le jeu à distance passe par RetroArch : pas disponible avec {} pour cette console.", emu.name),
+        ));
+    }
 
     // The ROM file, or for multi-file ROMs the folder they are extracted into.
     let dest = rom_path(&app, &rom).map_err(|e| fail("download-failed", e))?;
@@ -467,8 +476,22 @@ async fn launch(app: AppHandle, rom_id: u64, fullscreen: bool) -> Result<LaunchR
         }
     }
 
+    // Remote play: RetroArch netplay options (host through a relay, or join).
+    let (extra, room) = match &remote {
+        Some(mode) => netplay::arguments(mode, &netplay::config_dir(&data_dir)).map_err(|e| fail("launch-failed", e))?,
+        None => (Vec::new(), None),
+    };
+    let guest = matches!(remote, Some(netplay::Mode::Join(_)));
     let started = std::time::SystemTime::now();
-    let mut child = emulators::command(emu, exe, &rom.platform_slug, &target, fullscreen || cfg.fullscreen, save_dirs.first().map(PathBuf::as_path))
+    let mut child = emulators::command(
+        emu,
+        exe,
+        &rom.platform_slug,
+        &target,
+        fullscreen || cfg.fullscreen,
+        save_dirs.first().map(PathBuf::as_path),
+        &extra,
+    )
         .and_then(|mut c| {
             if !phone_mappings.is_empty() {
                 let mut all = std::env::var("SDL_GAMECONTROLLERCONFIG").unwrap_or_default();
@@ -492,6 +515,32 @@ async fn launch(app: AppHandle, rom_id: u64, fullscreen: bool) -> Result<LaunchR
     // The Android controller switches to this console's layout.
     phone::game_started(&rom, client.cover(&rom).await);
     relay::game_started(app.clone(), client.clone(), rom.id);
+    if guest {
+        shell::log(&app, &format!("jeu à distance rom={rom_id}: connexion à la partie de l'hôte"));
+    }
+    // Host: find the relay session, then invite through RomM.
+    let hosting = room.is_some();
+    if let Some((nick, password)) = room {
+        let (app3, client3, rom3) = (app.clone(), client.clone(), rom.id);
+        tauri::async_runtime::spawn(async move {
+            let _ = app3.emit("netplay", json!({ "romId": rom3, "status": "searching" }));
+            let ended = || !gamepad::is_running();
+            let result = match netplay::find_room(&nick, &password, ended).await {
+                Ok(session) => netplay::publish(&client3, rom3, &session).await.map(|_| session),
+                Err(e) => Err(e),
+            };
+            match result {
+                Ok(session) => {
+                    shell::log(&app3, &format!("jeu à distance rom={rom3}: invitation publiée (relais {}:{})", session.ip, session.port));
+                    let _ = app3.emit("netplay", json!({ "romId": rom3, "status": "ready" }));
+                }
+                Err(e) => {
+                    shell::log(&app3, &format!("jeu à distance rom={rom3}: {e}"));
+                    let _ = app3.emit("netplay", json!({ "romId": rom3, "status": "failed", "message": e }));
+                }
+            }
+        });
+    }
 
     let app2 = app.clone();
     tauri::async_runtime::spawn(async move {
@@ -503,12 +552,16 @@ async fn launch(app: AppHandle, rom_id: u64, fullscreen: bool) -> Result<LaunchR
         }
         phone::game_ended();
         relay::game_ended(app2.clone(), client.clone());
+        if hosting {
+            netplay::withdraw_all(&client, rom_id).await;
+        }
         // Back to the library, ready for the next pick with the controller.
         if let Some(win) = app2.get_webview_window("main") {
             let _ = win.set_focus();
         }
         launch_state(&app2, rom_id, json!({ "status": "exited", "exitCode": code }));
-        if save_dirs.is_empty() {
+        // A guest's save holds the host's game: never sent over the guest's own.
+        if save_dirs.is_empty() || guest {
             return;
         }
         if deferred {
@@ -682,6 +735,26 @@ fn set_pad_order(app: AppHandle, order: Vec<String>) -> Result<(), String> {
     let mut cfg = config::load(&app);
     cfg.pad_order = order;
     config::save(&app, &cfg)
+}
+
+/// Remote play: launch `rom_id` as netplay host and invite through RomM.
+#[tauri::command]
+async fn netplay_host(app: AppHandle, rom_id: u64) -> Result<LaunchResult, LaunchError> {
+    netplay::prepare(netplay::Mode::Host);
+    launch(app, rom_id, false).await
+}
+
+/// Remote play: join another user's game.
+#[tauri::command]
+async fn netplay_join(app: AppHandle, rom_id: u64, session: netplay::Session) -> Result<LaunchResult, LaunchError> {
+    netplay::prepare(netplay::Mode::Join(session));
+    launch(app, rom_id, false).await
+}
+
+/// Remote plays other users of the server offer right now.
+#[tauri::command]
+async fn netplay_invites(app: AppHandle) -> Result<Vec<netplay::Invite>, String> {
+    netplay::invites(&client(&app)?).await
 }
 
 /// Switch emulators set up here and whether they have decryption keys.
@@ -914,7 +987,10 @@ pub fn run() {
             switch_keys_status,
             import_switch_keys,
             detect_controllers,
-            set_pad_order
+            set_pad_order,
+            netplay_host,
+            netplay_join,
+            netplay_invites
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

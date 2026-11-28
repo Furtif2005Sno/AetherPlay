@@ -12,6 +12,24 @@ function tauri(): TauriGlobal {
   return (window as unknown as { __TAURI__: TauriGlobal }).__TAURI__;
 }
 
+/** RetroArch netplay session of a remote play (see netplay.rs). */
+export interface NetplaySession {
+  ip: string;
+  port: number;
+  session: string;
+  password: string;
+  retroarch: string;
+  core: string;
+}
+
+export interface NetplayInvite {
+  rom_id: number;
+  rom_name: string;
+  platform: string;
+  username: string;
+  session: NetplaySession;
+}
+
 export const isAetherPlay = () =>
   typeof (window as unknown as { __TAURI__?: unknown }).__TAURI__ === "object";
 
@@ -96,6 +114,11 @@ export const app = {
   imageCacheSize: () => invoke<number>("image_cache_size"),
   detectControllers: () => invoke<{ name: string; phone: boolean; idle: boolean }[]>("detect_controllers"),
   setPadOrder: (order: string[]) => invoke<void>("set_pad_order", { order }),
+  netplayHost: (romId: number) => invoke<unknown>("netplay_host", { romId }),
+  netplayJoin: (romId: number, session: NetplaySession) => invoke<unknown>("netplay_join", { romId, session }),
+  netplayInvites: () => invoke<NetplayInvite[]>("netplay_invites"),
+  onNetplay: (handler: (s: { romId: number; status: string; message?: string }) => void) =>
+    tauri().event.listen<{ romId: number; status: string; message?: string }>("netplay", (e) => handler(e.payload)),
   switchKeysStatus: () => invoke<{ id: string; name: string; keys: boolean; dir: string }[]>("switch_keys_status"),
   importSwitchKeys: (path: string) => invoke<number>("import_switch_keys", { path }),
   imageCacheClear: () => invoke<void>("image_cache_clear"),

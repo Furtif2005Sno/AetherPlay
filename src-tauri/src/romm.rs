@@ -136,6 +136,29 @@ impl Client {
         self.send(req).await.map(|_| ())
     }
 
+    /// RomM's "now playing" of every user.
+    pub async fn activity(&self) -> Result<Vec<serde_json::Value>, String> {
+        self.json(self.url(&["api", "activity"])).await
+    }
+
+    /// Public notes on a game (any user's).
+    pub async fn public_notes(&self, rom_id: u64) -> Result<Vec<serde_json::Value>, String> {
+        let mut url = self.url(&["api", "roms", &rom_id.to_string(), "notes"]);
+        url.query_pairs_mut().append_pair("public_only", "true");
+        self.json(url).await
+    }
+
+    pub async fn create_note(&self, rom_id: u64, body: &serde_json::Value) -> Result<serde_json::Value, String> {
+        let req = self.json_request(reqwest::Method::POST, &["api", "roms", &rom_id.to_string(), "notes"]).json(body);
+        self.send(req).await?.json().await.map_err(err)
+    }
+
+    pub async fn delete_note(&self, rom_id: u64, note_id: u64) -> Result<(), String> {
+        let req =
+            self.json_request(reqwest::Method::DELETE, &["api", "roms", &rom_id.to_string(), "notes", &note_id.to_string()]);
+        self.send(req).await.map(|_| ())
+    }
+
     /// The logged-in user (id, ui_settings…).
     pub async fn me(&self) -> Result<serde_json::Value, String> {
         self.json(self.url(&["api", "users", "me"])).await

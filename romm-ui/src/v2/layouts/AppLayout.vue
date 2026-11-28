@@ -18,6 +18,7 @@ import { useNativeStore } from "@/stores/native";
 import storePlatforms from "@/stores/platforms";
 import storePlaying from "@/stores/playing";
 import { useStreamingStore } from "@/stores/streaming";
+import RemotePlayInvites from "@/v2/aetherplay/RemotePlayInvites.vue";
 import AppNav from "@/v2/components/AppShell/AppNav.vue";
 import BackgroundArt from "@/v2/components/AppShell/BackgroundArt.vue";
 import BottomNav from "@/v2/components/AppShell/BottomNav.vue";
@@ -232,6 +233,7 @@ onBeforeUnmount(() => {
     </div>
 
     <GlobalDialogs />
+    <RemotePlayInvites />
     <SoundtrackMiniPlayer />
     <DebugOverlay v-if="debugEnabled" />
     <CrtOverlay />

@@ -69,6 +69,15 @@ L'app iPhone (`ios/`, SwiftUI, projet généré par XcodeGen) reprend la manette
 - **Connexion :** même réseau Wi-Fi que l'ordinateur, ou l'ordinateur connecté au partage de connexion de l'iPhone (utile sur un réseau qui isole les appareils). L'adresse IP peut aussi être tapée à la main.
 - **Jeux :** les touches passent par la manette virtuelle d'AetherPlay (SteamOS, ou Windows avec ViGEmBus). Sur Mac, l'iPhone ne pilote que les menus.
 
+## Jeu à distance (netplay)
+
+Sur la page d'un jeu, **Jouer à distance** lance la partie en hôte dans RetroArch (NES, SNES, N64, GB/GBA, Mega Drive, PS1…). Les autres utilisateurs du même serveur RomM voient l'invitation dans AetherPlay et cliquent sur **Rejoindre** : chacun fait tourner le jeu, seules les touches passent par Internet.
+
+- Pas de port à ouvrir : la partie passe par un serveur relais de RetroArch, protégée par un mot de passe aléatoire.
+- L'invitation est une note publique sur le jeu dans RomM, retirée à la fin de la partie.
+- La sauvegarde de l'invité n'est pas envoyée (elle contient la partie de l'hôte).
+- Pas disponible pour les émulateurs sans netplay (Switch, PS2…).
+
 ## SteamOS : installation
 
 1. Passer en **mode Bureau**, télécharger `AetherPlay-SteamOS.AppImage` (lien ci-dessus) et le ranger, par exemple dans `~/Applications`.

@@ -15,6 +15,7 @@ import { computed, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { useUISettings } from "@/composables/useUISettings";
 import type { DetailedRom } from "@/stores/roms";
+import RemotePlayBtn from "@/v2/aetherplay/RemotePlayBtn.vue";
 import GameActions from "@/v2/components/GameActions/GameActions.vue";
 import MainSiblingToggle from "@/v2/components/GameDetails/MainSiblingToggle.vue";
 import PrevNextNav from "@/v2/components/GameDetails/PrevNextNav.vue";
@@ -191,6 +192,7 @@ function onLogoLoad(event: Event) {
     </div>
 
     <GameActions :rom="rom" />
+    <RemotePlayBtn :rom="rom" />
   </div>
 </template>
 

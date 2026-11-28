@@ -277,6 +277,8 @@ pub fn command(
     rom: &Path,
     fullscreen: bool,
     save_dir: Option<&Path>,
+    // Options placed before the emulator's own (remote play).
+    extra: &[String],
 ) -> Result<tokio::process::Command, String> {
     let exe = executable(path)?;
     let core = match emu.cores.get(platform) {
@@ -296,6 +298,7 @@ pub fn command(
         d.to_string_lossy().into_owned()
     });
     let mut cmd = tokio::process::Command::new(&exe);
+    cmd.args(extra);
     if fullscreen {
         cmd.args(&emu.fullscreen_args);
     }
